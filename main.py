@@ -35,7 +35,7 @@ class Game(ShowBase):
             self.player.node,
             self.world,
             yaw=45.0,
-            pitch=50.0,
+            pitch=60.0,
             distance=26.0,
         )
 
