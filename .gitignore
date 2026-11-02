@@ -1,0 +1,16 @@
+# virtual environment
+.venv
+venv
+env
+
+# python
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# vscode
+*.code-workspace
+
+# operating system
+.DS_Store
+Thumbs.dbg

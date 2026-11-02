@@ -1,0 +1,53 @@
+from direct.showbase.ShowBase import ShowBase
+from panda3d.core import ClockObject, WindowProperties, loadPrcFileData
+
+from src.camera import FollowCamera
+from src.player import Player
+from src.world import World
+
+
+loadPrcFileData(
+    '',
+    '\n'.join((
+        "window-title Game",
+        "win-size 1280 720",
+        "framebuffer-multisample 1",
+        "multisamples 4",
+        "sync-video 0",
+    )),
+)
+
+
+class Game(ShowBase):
+    def __init__(self) -> None:
+        super().__init__()
+
+        if hasattr(self.win, 'requestProperties'):
+            props = WindowProperties()
+            props.setTitle('Game')
+            props.setSize(1280, 720)
+            self.win.requestProperties(props) # type: ignore
+
+        self.world = World(self)
+        self.player = Player(self, self.world)
+        self.camera_rig = FollowCamera(
+            self,
+            self.player.node,
+            self.world,
+            yaw=45.0,
+            pitch=50.0,
+            distance=26.0,
+        )
+
+        self.accept('escape', self.userExit)
+        self.taskMgr.add(self._update, 'update')
+
+    def _update(self, task):
+        dt = min(ClockObject.getGlobalClock().getDt(), 1.0 / 60.0)
+        self.player.update(dt, self.camera_rig.yaw)
+        self.camera_rig.update(dt)
+        return task.cont
+
+
+if __name__ == '__main__':
+    Game().run()
