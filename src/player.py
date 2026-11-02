@@ -8,6 +8,8 @@ from panda3d.core import (
     GeomVertexFormat,
     GeomVertexWriter,
     Material,
+    Plane,
+    Point3,
     Vec3,
     Vec4,
 )
@@ -99,7 +101,7 @@ def lerp_angle(current: float, target: float, alpha: float) -> float:
 
 
 class Player:
-    """A capsule that moves on the world's height field."""
+    """A capsule that moves on the world's height field and can dash."""
 
     def __init__(self, app, world) -> None:
         self.app = app
@@ -107,13 +109,16 @@ class Player:
 
         self.speed = 6.0
         self.turn_speed = 14.0
-        self.gravity = 24.0
-        self.jump_speed = 8.0
+
+        self.dash_speed = 24.0
+        self.dash_duration = 0.18
+        self.dash_cooldown = 0.6
 
         self.heading = 0.0
-        self._vz = 0.0
-        self._airborne = False
-        self._jump_queued = False
+        self._dash_time = 0.0
+        self._dash_cd = 0.0
+        self._dash_dir = Vec3(0.0, 1.0, 0.0)
+        self._dash_queued = False
         self._keys = {"forward": False, "back": False, "left": False, "right": False}
 
         self.node = app.render.attachNewNode("player")
@@ -134,14 +139,49 @@ class Player:
             app.accept(key, self._set_key, [action, True])
             app.accept(key + "-up", self._set_key, [action, False])
 
-        app.accept("space", self._queue_jump)
+        app.accept("space", self._queue_dash)
 
     # ------------------------------------------------------------------ input
     def _set_key(self, action: str, pressed: bool) -> None:
         self._keys[action] = pressed
 
-    def _queue_jump(self) -> None:
-        self._jump_queued = True
+    def _queue_dash(self) -> None:
+        self._dash_queued = True
+
+    def _cursor_ground_point(self, ground_z: float) -> Point3 | None:
+        """Project the mouse cursor onto the horizontal plane at ground_z."""
+        mouse = self.app.mouseWatcherNode
+        if not mouse.hasMouse():
+            return None
+
+        near, far = Point3(), Point3()
+        self.app.camLens.extrude(mouse.getMouse(), near, far)
+        near = self.app.render.getRelativePoint(self.app.camera, near)
+        far = self.app.render.getRelativePoint(self.app.camera, far)
+
+        hit = Point3()
+        plane = Plane(Vec3(0.0, 0.0, 1.0), Point3(0.0, 0.0, ground_z))
+        if plane.intersectsLine(hit, near, far):
+            return hit
+        return None
+
+    def _start_dash(self, pos: Vec3) -> None:
+        direction = None
+        target = self._cursor_ground_point(pos.z)
+        if target is not None:
+            d = Vec3(target.x - pos.x, target.y - pos.y, 0.0)
+            if d.lengthSquared() > 1e-6:
+                d.normalize()
+                direction = d
+        if direction is None:  # no cursor: dash the way the player faces
+            h = math.radians(self.heading)
+            direction = Vec3(math.sin(h), math.cos(h), 0.0)
+
+        self._dash_dir = direction
+        self._dash_time = self.dash_duration
+        self._dash_cd = self.dash_cooldown
+        self.heading = math.degrees(math.atan2(direction.x, direction.y))
+        self.node.setH(self.heading)
 
     # ------------------------------------------------------------------ update
     def update(self, dt: float, camera_yaw: float) -> None:
@@ -149,23 +189,36 @@ class Player:
             return
 
         pos = self.node.getPos(self.app.render)
-        x = (1.0 if self._keys["right"] else 0.0) - (1.0 if self._keys["left"] else 0.0)
-        y = (1.0 if self._keys["forward"] else 0.0) - (1.0 if self._keys["back"] else 0.0)
+        self._dash_cd = max(0.0, self._dash_cd - dt)
 
-        if x != 0.0 or y != 0.0:
-            yaw = math.radians(camera_yaw)
-            forward = Vec3(math.sin(yaw), math.cos(yaw), 0.0)
-            right = Vec3(math.cos(yaw), -math.sin(yaw), 0.0)
-            direction = forward * y + right * x
-            direction.normalize()
+        if self._dash_queued:
+            self._dash_queued = False
+            if self._dash_time <= 0.0 and self._dash_cd <= 0.0:
+                self._start_dash(pos)
 
-            target_heading = math.degrees(math.atan2(direction.x, direction.y))
-            alpha = 1.0 - math.exp(-self.turn_speed * dt)
-            self.heading = lerp_angle(self.heading, target_heading, alpha)
-            self.node.setH(self.heading)
+        if self._dash_time > 0.0:
+            step = min(dt, self._dash_time)
+            self._dash_time -= dt
+            pos.x += self._dash_dir.x * self.dash_speed * step
+            pos.y += self._dash_dir.y * self.dash_speed * step
+        else:
+            x = (1.0 if self._keys["right"] else 0.0) - (1.0 if self._keys["left"] else 0.0)
+            y = (1.0 if self._keys["forward"] else 0.0) - (1.0 if self._keys["back"] else 0.0)
 
-            pos.x += direction.x * self.speed * dt
-            pos.y += direction.y * self.speed * dt
+            if x != 0.0 or y != 0.0:
+                yaw = math.radians(camera_yaw)
+                forward = Vec3(math.sin(yaw), math.cos(yaw), 0.0)
+                right = Vec3(math.cos(yaw), -math.sin(yaw), 0.0)
+                direction = forward * y + right * x
+                direction.normalize()
+
+                target_heading = math.degrees(math.atan2(direction.x, direction.y))
+                alpha = 1.0 - math.exp(-self.turn_speed * dt)
+                self.heading = lerp_angle(self.heading, target_heading, alpha)
+                self.node.setH(self.heading)
+
+                pos.x += direction.x * self.speed * dt
+                pos.y += direction.y * self.speed * dt
 
         radius = math.hypot(pos.x, pos.y)
         if radius > self.world.play_radius:
@@ -173,21 +226,5 @@ class Player:
             pos.x *= scale
             pos.y *= scale
 
-        ground = self.world.height_at(pos.x, pos.y)
-        if self._airborne:
-            self._vz -= self.gravity * dt
-            pos.z += self._vz * dt
-            if pos.z <= ground:
-                pos.z = ground
-                self._vz = 0.0
-                self._airborne = False
-        else:
-            pos.z = ground
-
-        if self._jump_queued:
-            if not self._airborne:
-                self._vz = self.jump_speed
-                self._airborne = True
-            self._jump_queued = False
-
+        pos.z = self.world.height_at(pos.x, pos.y)
         self.node.setPos(pos)
