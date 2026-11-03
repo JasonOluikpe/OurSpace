@@ -1,94 +1,89 @@
 import math
-
 from panda3d.core import InputDevice
 
-
-Axis = InputDevice.Axis
-
 DEADZONE = 0.2
-DASH_BUTTON = "gamepad-face_a"        # Cross
-INVERT_Y = False                      # flip if "up" on the stick moves backwards
-STICK_AXES = (                        # (x axis, y axis, y is "down = positive")
-    (InputDevice.Axis.left_x, InputDevice.Axis.left_y, False),
-    (InputDevice.Axis.x, InputDevice.Axis.y, True),     # generic HID stick
-)
-
 
 class Gamepad:
     def __init__(self, app, on_dash) -> None:
         self.app = app
         self._on_dash = on_dash
         self._pad = None
-        self._x = self._y = None          # stick axis ids (Axis.*)
-        self._flip_y = False
 
-        app.accept("f2", self.print_debug)    # F2: dump raw axis values
         app.accept("connect-device", self._connected)
         app.accept("disconnect-device", self._disconnected)
+
+        # Check both gamepad and generic unknown HID devices (common for PS4 on Windows)
         for pad in app.devices.getDevices(InputDevice.DeviceClass.gamepad):
             self._connected(pad)
+        for pad in app.devices.getDevices(InputDevice.DeviceClass.unknown):
+            self._connected(pad)
 
-    @property
-    def connected(self) -> bool:
-        return self._pad is not None
-
-    # ------------------------------------------------------------------ hot-plug
     def _connected(self, device) -> None:
-        if self._pad is not None or device.device_class != InputDevice.DeviceClass.gamepad:
+        if self._pad is not None:
             return
+        # Ignore keyboards and mice just in case
+        if device.device_class in (InputDevice.DeviceClass.keyboard, InputDevice.DeviceClass.mouse):
+            return
+            
         self._pad = device
-        self._pick_stick_axes(device)
         self.app.attachInputDevice(device, prefix="gamepad")
-        self.app.accept(DASH_BUTTON, self._on_dash)
-
-    def _pick_stick_axes(self, device) -> None:
-        present = [a.axis for a in device.axes]
-        print(f"[gamepad] {device.name!r}: axes {[str(a) for a in present]}")
-        for x_axis, y_axis, flip_y in STICK_AXES:
-            if x_axis in present and y_axis in present:
-                self._x, self._y = x_axis, y_axis
-                self._flip_y = flip_y
-                print(f"[gamepad] left stick = {x_axis}/{y_axis}")
-                return
-        print("[gamepad] no stick axes found; only buttons will work")
-        self._x = self._y = None
+        
+        # Bind multiple variations of face/action buttons across different SDL/Panda3D backend mappings
+        for event_name in (
+            "gamepad-face-a",
+            "gamepad-face_a",
+            "gamepad-face-bottom",
+            "gamepad-south",
+            "gamepad-button-0",
+        ):
+            self.app.accept(event_name, self._on_dash)
 
     def _disconnected(self, device) -> None:
-        if device is not self._pad:
+        if device is not self._pad: 
             return
-        self.app.ignore(DASH_BUTTON)
+        for event_name in (
+            "gamepad-face-a",
+            "gamepad-face_a",
+            "gamepad-face-bottom",
+            "gamepad-south",
+            "gamepad-button-0",
+        ):
+            self.app.ignore(event_name)
         self.app.detachInputDevice(device)
-        self._pad = self._x = self._y = None
+        self._pad = None
 
-    # ------------------------------------------------------------------ polling
     def stick(self) -> tuple[float, float]:
-        if self._x is None:
+        if not self._pad: 
             return 0.0, 0.0
-        # Guard against disconnected gamepad; check _pad before accessing axes.
-        if self._pad is None:
-            return 0.0, 0.0
-        # Look the axes up every frame so we always read the live value.
-        x = self._pad.findAxis(self._x).value
-        y = self._pad.findAxis(self._y).value
-        if self._flip_y != INVERT_Y:
-            y = -y
-        magnitude = math.hypot(x, y)
-        if magnitude < DEADZONE:
-            return 0.0, 0.0
-        # Normalize deadzone to output full range without division by magnitude issues:
-        # At exact deadzone boundary (magnitude == DEADZONE), we scale as 0
-        # As magnitude grows toward 1.0, it scales linearly to full output
-        normalized = min(magnitude - DEADZONE, 1.0 - DEADZONE)
-        scale = normalized / (1.0 - DEADZONE)
-        # Apply direction sign properly and avoid division by zero when near origin
-        if magnitude > 0:
-            return x * scale / max(0.5, magnitude), y * scale / max(0.5, magnitude)
-        # Edge case: exact zero magnitude shouldn't reach here due to deadzone check
-        return 0.0, 0.0
+        
+        x = 0.0
+        y = 0.0
+        
+        # Read all available axes into a dictionary
+        axes = {a.axis: a.value for a in self._pad.axes}
+        
+        # Check standard PS4/Xbox combinations
+        if InputDevice.Axis.left_x in axes and InputDevice.Axis.left_y in axes:
+            x = axes[InputDevice.Axis.left_x]
+            y = axes[InputDevice.Axis.left_y]
+        elif InputDevice.Axis.x in axes and InputDevice.Axis.y in axes:
+            x = axes[InputDevice.Axis.x]
+            y = axes[InputDevice.Axis.y]
+        elif InputDevice.Axis.z in axes and InputDevice.Axis.rz in axes:
+            x = axes[InputDevice.Axis.z]
+            y = axes[InputDevice.Axis.rz]
+        elif len(self._pad.axes) >= 2:
+            # Absolute fallback: grab the first two axes available
+            x = self._pad.axes[0].value
+            y = self._pad.axes[1].value
 
-    def print_debug(self) -> None:
-        if self._pad is None:
-            print("[gamepad] none connected")
-            return
-        values = {str(a.axis): round(a.value, 2) for a in self._pad.axes}
-        print(f"[gamepad] raw axes: {values}")
+        # Removed the negative sign so pushing up moves the player up
+        y = y
+        
+        # Apply deadzone and normalize
+        mag = math.hypot(x, y)
+        if mag < DEADZONE:
+            return 0.0, 0.0
+            
+        norm = min(1.0, (mag - DEADZONE) / (1.0 - DEADZONE))
+        return (x / mag) * norm, (y / mag) * norm

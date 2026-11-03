@@ -37,7 +37,7 @@ class Game(ShowBase):
         self.taskMgr.add(self._update, 'update')
 
     def _update(self, task):
-        dt = min(ClockObject.getGlobalClock().getDt(), 1.0 / 30.0)
+        dt = min(ClockObject.getGlobalClock().getDt(), 1.0 / 60.0)
         self.player.update(dt, self.camera_rig.yaw)
         self.camera_rig.update(dt)
         return task.cont
