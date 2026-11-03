@@ -1,0 +1,6 @@
+C:\Users\Ebube\Desktop\Game\rea_inspect\Inspect\obj\Debug\net10.0\Inspect.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Ebube\Desktop\Game\rea_inspect\Inspect\obj\Debug\net10.0\Inspect.AssemblyInfoInputs.cache
+C:\Users\Ebube\Desktop\Game\rea_inspect\Inspect\obj\Debug\net10.0\Inspect.AssemblyInfo.cs
+C:\Users\Ebube\Desktop\Game\rea_inspect\Inspect\obj\Debug\net10.0\Inspect.csproj.CoreCompileInputs.cache
+C:\Users\Ebube\Desktop\Game\rea_inspect\Inspect\obj\Debug\net10.0\Inspect.sourcelink.json
+C:\Users\Ebube\Desktop\Game\rea_inspect\Inspect\obj\Debug\net10.0\Inspect.csproj.AssemblyReference.cache

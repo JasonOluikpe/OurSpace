@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "j5gLza9MVlk=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Ebube\\Desktop\\Game\\rea_inspect\\Inspect\\Inspect.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Ebube\\.nuget\\packages\\system.reflection.metadataloadcontext\\10.0.14\\system.reflection.metadataloadcontext.10.0.14.nupkg.sha512"
+  ],
+  "logs": []
+}
