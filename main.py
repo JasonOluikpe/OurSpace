@@ -1,5 +1,5 @@
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import ClockObject, WindowProperties, loadPrcFileData
+from panda3d.core import ClockObject, loadPrcFileData
 
 from src.camera import FollowCamera
 from src.player import Player
@@ -21,12 +21,6 @@ loadPrcFileData(
 class Game(ShowBase):
     def __init__(self) -> None:
         super().__init__()
-
-        if hasattr(self.win, 'requestProperties'):
-            props = WindowProperties()
-            props.setTitle('Game')
-            props.setSize(1280, 720)
-            self.win.requestProperties(props) # type: ignore
 
         self.world = World(self)
         self.player = Player(self, self.world)

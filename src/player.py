@@ -2,8 +2,6 @@
 
 Everything here comes from the REA notes on ``Dew.Core``:
 
-* ``EntityControl`` runs a NavMeshAgent in the real game; this project uses
-  the same velocity maths directly on the player node.
 * ``baseAgentSpeed = 5``, ``normalizedAcceleration = 4``,
   ``rotateSpeed = 720`` deg/s, ``rotationSmoothTime = 0.05``.
 * Acceleration is ``normalizedAcceleration * maxSpeed`` (doubled while
@@ -15,12 +13,13 @@ Everything here comes from the REA notes on ``Dew.Core``:
 
 Controls
 --------
-* WASD           - camera-relative movement
-* Left mouse     - click/hold to move to the cursor (destination mode)
-* Space          - dash in the current movement direction
-* F              - fake attack, triggers the attack movement slow
-* K              - take a knockback (demonstrates displacement)
-* H / J          - take 10 damage / heal 20 (drives the camera vignette)
+* WASD / left stick - camera-relative movement (stick is analog)
+* Left mouse        - click/hold to move to the cursor (destination mode)
+* Space             - dash towards the mouse cursor
+* Cross (PS4)       - dash in the current movement direction
+* F                 - fake attack, triggers the attack movement slow
+* K                 - take a knockback (demonstrates displacement)
+* H / J             - take 10 damage / heal 20 (drives the camera vignette)
 
 Not applicable here: Mirror networking, NavMesh obstacle avoidance (the
 arena is flat and open) and the animation parameter layer.
@@ -46,18 +45,21 @@ from panda3d.core import (
     Vec4,
 )
 
-from .displacement import (
-    Dash,
-    DashDirection,
-    DewEase,
-    DispByDestination,
-    DispByTarget,
-    Displacement,
+from .displacement import Dash, DashDirection, DewEase, DispByDestination, Displacement
+from .gamepad import Gamepad
+from .mathutil import (
+    delta_angle,
+    dir_from_yaw,
+    move_towards,
+    move_towards_angle,
+    rotate_yaw,
+    smooth_damp_angle,
+    yaw_from_dir,
 )
 
 
 # ---------------------------------------------------------------------------
-# Geometry / maths helpers
+# Geometry
 # ---------------------------------------------------------------------------
 
 def make_capsule(radius: float, height: float, segments: int = 20, cap_rings: int = 8):
@@ -140,50 +142,6 @@ def make_capsule(radius: float, height: float, segments: int = 20, cap_rings: in
     return node
 
 
-def delta_angle(current: float, target: float) -> float:
-    return (target - current + 180.0) % 360.0 - 180.0
-
-
-def move_towards(current: float, target: float, max_delta: float) -> float:
-    if abs(target - current) <= max_delta:
-        return target
-    return current + math.copysign(max_delta, target - current)
-
-
-def move_towards_angle(current: float, target: float, max_delta: float) -> float:
-    d = delta_angle(current, target)
-    if abs(d) <= max_delta:
-        return target
-    return current + math.copysign(max_delta, d)
-
-
-def smooth_damp_angle(current: float, target: float, velocity: float,
-                      smooth_time: float, dt: float) -> tuple[float, float]:
-    target = current + delta_angle(current, target)
-    smooth_time = max(0.0001, smooth_time)
-    omega = 2.0 / smooth_time
-    x = omega * dt
-    exp = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x)
-    change = current - target
-    temp = (velocity + omega * change) * dt
-    velocity = (velocity - omega * temp) * exp
-    output = target + (change + temp) * exp
-    if (target - current > 0.0) == (output > target):
-        output = target
-        velocity = (output - target) / dt if dt > 0.0 else 0.0
-    return output, velocity
-
-
-def dir_from_yaw(yaw_deg: float) -> Vec3:
-    """Yaw 0 = +Y, yaw 90 = +X (same convention as the camera)."""
-    a = math.radians(yaw_deg)
-    return Vec3(math.sin(a), math.cos(a), 0.0)
-
-
-def yaw_from_dir(x: float, y: float) -> float:
-    return math.degrees(math.atan2(x, y))
-
-
 # ---------------------------------------------------------------------------
 # Player / EntityControl
 # ---------------------------------------------------------------------------
@@ -200,9 +158,6 @@ class Player:
         self.normalized_acceleration = 4.0
         self.rotate_speed = 720.0
         self.rotation_smooth_time = 0.05
-        self.outer_radius = 0.45
-        self.inner_radius = 0.25
-        self.obstacle_avoidance = True
         self.is_hero = True
 
         # --- stats (FinalStats.movementSpeedMultiplier)
@@ -211,38 +166,28 @@ class Player:
         self.health = 100.0
         self.disable_damage_overlay = False
 
+        # --- crowd control
+        self.is_rooted = False
+        self.is_stunned = False
+        self.has_crowd_control_immunity = False
+
         # --- movement state
         self.local_velocity = Vec3(0.0, 0.0, 0.0)
         self.speed = 0.0
         self.vel_yaw = 0.0
         self.body_yaw = 0.0
         self._body_yaw_vel = 0.0
-        self._walk_strength = 0.0
-        self.force_walking = False
-        self.actions_blocked = False
-        self.is_rooted = False
-        self.is_stunned = False
-        self.is_invulnerable = False
-        self.is_unstoppable = False
-        self.has_crowd_control_immunity = False
 
+        # Directional input (WASD / stick) is a vector of length <= 1;
+        # destination input (mouse) is a point.  At most one is active.
         self._movement_vector: Optional[Vec3] = None
-        self._is_direction = False
         self._destination: Optional[Vec3] = None
-        self._destination_speed_multiplier = 1.0
 
         # --- ControlManager tuning
         self.continuous_move_dispatch_interval = 0.0625
-        self.directional_move_dispatch_interval = 1.0 / 60.0
-        self.movement_direction_stale_time = 0.4
-        self.min_walk_strength_for_gamepads = 0.0
-        self._last_movement_direction = Vec3(0.0, 1.0, 0.0)
-        self._last_movement_strength = 0.0
-        self._last_movement_direction_time = -1e9
         self._mouse_held = False
         self._last_mouse_dispatch = -1e9
 
-        # --- attack movement slow
         self._attack_slow_start = -1e9
         self._attack_slow_duration = 0.0
 
@@ -250,7 +195,6 @@ class Player:
         self.dash_distance = 2.25
         self.dash_duration = 0.25
         self.dash_ease = DewEase.Linear
-        self.dash_direction = DashDirection.CurrentMovement
         self.dash_cooldown = 0.6          # ability data, not in the DLL
         self._dash_cooldown = 0.0
 
@@ -262,8 +206,7 @@ class Player:
         self.node = app.render.attachNewNode("player")
         self.node.setPos(world.spawn.x, world.spawn.y, world.spawn.z)
 
-        capsule = make_capsule(radius=0.4, height=1.8)
-        self.model = self.node.attachNewNode(capsule)
+        self.model = self.node.attachNewNode(make_capsule(radius=0.4, height=1.8))
         self.model.setTwoSided(True)
 
         material = Material()
@@ -283,12 +226,16 @@ class Player:
             self.app.accept(key, self._set_key, [action, True])
             self.app.accept(key + "-up", self._set_key, [action, False])
 
-        self.app.accept("space", self._try_dash)
-        self.app.accept("mouse1", self._on_mouse_down)
-        self.app.accept("mouse1-up", self._on_mouse_up)
+        self.app.accept("space", self._try_dash, [DashDirection.AllTowardsCursor])
+        self.app.accept("mouse1", self._set_mouse_held, [True])
+        self.app.accept("mouse1-up", self._set_mouse_held, [False])
+
+        # PS4 controller: left stick moves, Cross dashes the way you move.
+        self.gamepad = Gamepad(
+            self.app, lambda: self._try_dash(DashDirection.CurrentMovement))
 
         # Small demo hooks for systems without an attack/damage source here.
-        self.app.accept("f", self._simulate_attack)
+        self.app.accept("f", self.set_attack_move_slow, [0.35])
         self.app.accept("k", self._simulate_knockback)
         self.app.accept("h", self.take_damage, [10.0])
         self.app.accept("j", self.heal, [20.0])
@@ -296,19 +243,13 @@ class Player:
     def _set_key(self, action: str, pressed: bool) -> None:
         self._keys[action] = pressed
 
-    def _on_mouse_down(self) -> None:
-        self._mouse_held = True
-        self._last_mouse_dispatch = -1e9
-
-    def _on_mouse_up(self) -> None:
-        self._mouse_held = False
-
-    def _simulate_attack(self) -> None:
-        self.set_attack_move_slow(0.35)
+    def _set_mouse_held(self, held: bool) -> None:
+        self._mouse_held = held
+        if held:
+            self._last_mouse_dispatch = -1e9
 
     def _simulate_knockback(self) -> None:
-        self.apply_knockback(-dir_from_yaw(self.body_yaw),
-                             distance=1.6, duration=0.22)
+        self.apply_knockback(-dir_from_yaw(self.body_yaw), distance=1.6, duration=0.22)
 
     # ------------------------------------------------------------------ queries
     @property
@@ -322,43 +263,12 @@ class Player:
                 * self._attack_move_multiplier())
 
     @property
-    def walk_strength(self) -> float:
-        return self._filter_walk_strength(self._walk_strength)
-
-    @property
-    def is_walking(self) -> bool:
-        return self.walk_strength > 0.01
-
-    @property
     def is_displacing(self) -> bool:
         return self.displacement is not None
 
     @property
     def is_dashing(self) -> bool:
         return self.displacement is not None and self.displacement.is_friendly
-
-    @property
-    def is_dodging(self) -> bool:
-        return self.displacement is not None and self.displacement.is_dodging
-
-    @property
-    def is_last_movement_direction_fresh(self) -> bool:
-        return (time.monotonic() - self._last_movement_direction_time
-                < self.movement_direction_stale_time)
-
-    @property
-    def health_ratio(self) -> float:
-        return self.health / self.max_health if self.max_health > 0.0 else 0.0
-
-    def _filter_walk_strength(self, value: float) -> float:
-        if self.force_walking:
-            return 1.0
-        if (self.actions_blocked or self.is_displacing
-                or self.is_rooted or self.is_stunned):
-            return 0.0
-        if self.current_max_agent_speed < 0.1:
-            return 0.0
-        return value
 
     def _attack_move_multiplier(self) -> float:
         duration = self._attack_slow_duration
@@ -374,9 +284,6 @@ class Player:
         self._attack_slow_start = time.monotonic()
         self._attack_slow_duration = max(0.0, duration) * 2.0
 
-    def set_movement_speed_multiplier(self, value: float) -> None:
-        self.movement_speed_multiplier = max(0.0, value)
-
     def take_damage(self, amount: float) -> None:
         self.health = max(0.0, self.health - max(0.0, amount))
 
@@ -389,8 +296,7 @@ class Player:
         if not mouse or not mouse.hasMouse():
             return None
         near, far = Point3(), Point3()
-        point = mouse.getMouse()
-        self.app.camLens.extrude(point, near, far)
+        self.app.camLens.extrude(mouse.getMouse(), near, far)
         near = self.app.render.getRelativePoint(self.app.camera, near)
         far = self.app.render.getRelativePoint(self.app.camera, far)
         hit = Point3()
@@ -429,18 +335,25 @@ class Player:
             if discriminant <= 0.0:
                 return self._clamp_to_play_area(Vec3(start))
             t = (-b + math.sqrt(discriminant)) / (2.0 * a)
-            t = max(0.0, min(1.0, t))
-            result = start + direction * t
+            result = start + direction * max(0.0, min(1.0, t))
         else:
             length = math.hypot(end.x, end.y)
-            if length < 1e-8:
-                result = Vec3(0.0, 0.0, 0.0)
-            else:
-                result = Vec3(end.x * limit / length, end.y * limit / length, 0.0)
+            result = Vec3(0.0, 0.0, 0.0) if length < 1e-8 else Vec3(
+                end.x * limit / length, end.y * limit / length, 0.0)
 
         return self._clamp_to_play_area(result)
 
     # ------------------------------------------------------------------ input logic
+    def _read_directional_input(self) -> tuple[float, float]:
+        """Left stick if it is active, otherwise WASD.  Length <= 1."""
+        stick = self.gamepad.stick()
+        if stick != (0.0, 0.0):
+            return stick
+        ix = (1.0 if self._keys["right"] else 0.0) - (1.0 if self._keys["left"] else 0.0)
+        iy = (1.0 if self._keys["forward"] else 0.0) - (1.0 if self._keys["back"] else 0.0)
+        length = math.hypot(ix, iy)
+        return (ix / length, iy / length) if length > 1.0 else (ix, iy)
+
     def _process_input(self, now: float, camera_yaw: float) -> None:
         # The game checks the move trigger first; mouse movement wins while held.
         if self._mouse_held:
@@ -449,46 +362,26 @@ class Player:
                 hit = self._cursor_ground_point()
                 if hit is not None:
                     self._destination = self._clamp_to_play_area(hit)
-                    self._destination_speed_multiplier = 1.0
                     self._movement_vector = None
-                    self._is_direction = False
             return
 
-        ix = (1.0 if self._keys["right"] else 0.0) - (1.0 if self._keys["left"] else 0.0)
-        iy = (1.0 if self._keys["forward"] else 0.0) - (1.0 if self._keys["back"] else 0.0)
-
-        if ix != 0.0 or iy != 0.0:
-            # Camera-relative input: entityCamAngleRotation * (x, 0, y).
-            angle = math.radians(camera_yaw)
-            forward = Vec3(math.sin(angle), math.cos(angle), 0.0)
-            right = Vec3(math.cos(angle), -math.sin(angle), 0.0)
-            wish = forward * iy + right * ix
-            wish.normalize()
-
-            self._last_movement_direction = Vec3(wish)
-            self._last_movement_strength = 1.0
-            self._last_movement_direction_time = now
-
-            self._movement_vector = wish
-            self._is_direction = True
+        ix, iy = self._read_directional_input()
+        strength = math.hypot(ix, iy)
+        if strength > 0.0:
+            # Camera-relative input: entityCamAngleRotation * (x, 0, y), with
+            # the game's 0.4 + 0.6 * strength speed curve.
+            wish = rotate_yaw(Vec3(ix, iy, 0.0), camera_yaw) / strength
+            self._movement_vector = wish * (0.4 + 0.6 * strength)
             self._destination = None
-            self._destination_speed_multiplier = 1.0
-        elif self._is_direction:
-            # Directional input released -> ClearMovement().
-            self._movement_vector = None
-            self._is_direction = False
+        else:
+            self._movement_vector = None      # ClearMovement()
 
     # ------------------------------------------------------------------ movement
     def _do_movement_processor_frame_update(self, dt: float, pos: Vec3) -> None:
         target_velocity = Vec3(0.0, 0.0, 0.0)
-        target_walk = 0.0
 
-        if self._is_direction and self._movement_vector is not None:
-            magnitude = min(1.0, self._movement_vector.length())
-            if magnitude > 1e-6:
-                target_velocity = self._movement_vector * (
-                    self.current_max_agent_speed / magnitude)
-                target_walk = magnitude
+        if self._movement_vector is not None:
+            target_velocity = self._movement_vector * self.current_max_agent_speed
         elif self._destination is not None:
             delta = self._destination - pos
             delta.z = 0.0
@@ -496,30 +389,16 @@ class Player:
             if distance <= max(0.1, self.local_velocity.length() * dt):
                 self._destination = None
             else:
-                speed = (self.current_max_agent_speed
-                         * self._destination_speed_multiplier)
-                target_velocity = delta * (speed / distance)
-                target_walk = self._destination_speed_multiplier
-
-        # Walk strength snaps upwards, but eases back to zero at 20 units/s.
-        if target_walk <= 0.0:
-            self._walk_strength = move_towards(
-                self._walk_strength, 0.0, dt * 20.0)
-        else:
-            self._walk_strength = target_walk
+                target_velocity = delta * (self.current_max_agent_speed / distance)
 
         velocity = self._do_velocity_update(target_velocity, dt)
-        pos = pos + velocity * dt
-        pos = self._clamp_to_play_area(pos)
-        self.node.setPos(pos)
+        self.node.setPos(self._clamp_to_play_area(pos + velocity * dt))
 
         if self.speed > 0.1:
             difference = abs(delta_angle(self.body_yaw, self.vel_yaw))
-            smoothing = self.rotation_smooth_time * (
-                2.0 if difference < 60.0 else 1.0)
+            smoothing = self.rotation_smooth_time * (2.0 if difference < 60.0 else 1.0)
             self.body_yaw, self._body_yaw_vel = smooth_damp_angle(
-                self.body_yaw, self.vel_yaw, self._body_yaw_vel,
-                smoothing, dt)
+                self.body_yaw, self.vel_yaw, self._body_yaw_vel, smoothing, dt)
             self.node.setH(-self.body_yaw)
 
     def _do_velocity_update(self, target_velocity: Vec3, dt: float) -> Vec3:
@@ -533,69 +412,45 @@ class Player:
             acceleration = self.normalized_acceleration * max_speed
 
         rate = acceleration * dt * (2.0 if current_speed > target_speed else 1.0)
-        new_speed = move_towards(current_speed, target_speed, rate)
+        self.speed = move_towards(current_speed, target_speed, rate)
 
         if target_speed > 1e-6:
-            target_yaw = yaw_from_dir(target_velocity.x, target_velocity.y)
-        else:
-            target_yaw = self.vel_yaw
+            self.vel_yaw = move_towards_angle(
+                self.vel_yaw, yaw_from_dir(target_velocity.x, target_velocity.y),
+                self.rotate_speed * max(0.0, self.movement_speed_multiplier) * dt)
 
-        self.vel_yaw = move_towards_angle(
-            self.vel_yaw, target_yaw,
-            self.rotate_speed * max(0.0, self.movement_speed_multiplier) * dt)
-
-        velocity = dir_from_yaw(self.vel_yaw) * new_speed
-        self.local_velocity = velocity
-        self.speed = new_speed
-        return velocity
+        self.local_velocity = dir_from_yaw(self.vel_yaw) * self.speed
+        return self.local_velocity
 
     # ------------------------------------------------------------------ dash
-    def _dash_direction_vector(self) -> Optional[Vec3]:
-        if self.dash_direction == DashDirection.AllTowardsCursor:
-            hit = self._cursor_ground_point()
-            if hit is not None:
-                delta = hit - self.agent_position
-                delta.z = 0.0
-                if delta.lengthSquared() > 1e-6:
-                    return delta.normalized()
+    def _dash_direction_vector(self, mode: DashDirection) -> Vec3:
+        """Aim of a dash: the cursor, else the way we are moving, else facing."""
+        pos = self.agent_position
+        candidates = []
+        if mode == DashDirection.AllTowardsCursor:
+            candidates.append(self._cursor_ground_point())
+        if self._movement_vector is not None:
+            candidates.append(pos + self._movement_vector)
+        candidates.append(self._destination)
 
-        if (self._is_direction and self._movement_vector is not None
-                and self._movement_vector.lengthSquared() > 1e-6):
-            return self._movement_vector.normalized()
-
-        if self._destination is not None:
-            delta = self._destination - self.agent_position
+        for point in candidates:
+            if point is None:
+                continue
+            delta = point - pos
             delta.z = 0.0
             if delta.lengthSquared() > 1e-6:
                 return delta.normalized()
-
-        if self.dash_direction == DashDirection.CurrentMovementOnlyDodge:
-            return None
-
         return dir_from_yaw(self.body_yaw)
 
-    def _try_dash(self) -> None:
+    def _try_dash(self, mode: DashDirection) -> None:
         if self.is_displacing or self._dash_cooldown > 0.0:
             return
-        direction = self._dash_direction_vector()
-        if direction is None:
-            return
-
-        dash = Dash(
+        Dash(
             distance=self.dash_distance,
             duration=self.dash_duration,
             ease=self.dash_ease,
-            rotate_forward=True,
-            affected_by_movement_speed=False,
-            use_linear_sweep=True,
-            can_go_over_terrain=False,
-        )
-        dash.apply_by_direction(self, direction, on_finish=self._on_dash_finish)
+        ).apply_by_direction(self, self._dash_direction_vector(mode))
         self._dash_cooldown = self.dash_cooldown
-
-    def _on_dash_finish(self) -> None:
-        self.speed = 0.0
-        self.local_velocity = Vec3(0.0, 0.0, 0.0)
 
     # ------------------------------------------------------------------ displacement
     def start_displacement(self, displacement: Displacement) -> None:
@@ -606,37 +461,29 @@ class Player:
             displacement.cancel()
             return
         if self.displacement is not None:
-            previous = self.displacement
-            self.displacement = None
-            previous.cancel()
+            self.cancel_displacement()
 
         displacement.start()
         self.displacement = displacement
         self._disp_start = self.agent_position
         self.speed = 0.0
         self.local_velocity = Vec3(0.0, 0.0, 0.0)
-        self._walk_strength = 0.0
 
     def cancel_displacement(self) -> None:
-        displacement = self.displacement
-        if displacement is None:
-            return
-        self.displacement = None
-        displacement.cancel()
+        displacement, self.displacement = self.displacement, None
+        if displacement is not None:
+            displacement.cancel()
 
     def _finish_displacement(self) -> None:
-        displacement = self.displacement
+        displacement, self.displacement = self.displacement, None
         if displacement is None:
             return
-        self.displacement = None
         displacement.finish()
         self.speed = 0.0
         self.local_velocity = Vec3(0.0, 0.0, 0.0)
 
     def _do_displacement(self, dt: float, pos: Vec3) -> None:
         displacement = self.displacement
-        if displacement is None:
-            return
 
         # DoDisplacement cancels when crowd control lands on the entity.
         if displacement.is_canceled_by_cc and (self.is_rooted or self.is_stunned):
@@ -650,45 +497,18 @@ class Player:
             if self.is_hero:
                 multiplier = min(multiplier, 2.5)
 
-        if isinstance(displacement, DispByDestination):
-            duration = max(1e-5, displacement.duration)
-            t = displacement.elapsed_time / duration
-            target = displacement.position_at(
-                self._disp_start, t, multiplier)
-            target = self._clamp_to_play_area(target)
-            delta = target - pos
+        duration = max(1e-5, displacement.duration)
+        target = displacement.position_at(
+            self._disp_start, displacement.elapsed_time / duration, multiplier)
+        target = self._clamp_to_play_area(target)
 
-            if displacement.rotate_forward:
-                self._set_body_yaw_from_direction(
-                    delta, displacement.rotate_smoothly, dt)
+        if displacement.rotate_forward:
+            self._set_body_yaw_from_direction(
+                target - pos, displacement.rotate_smoothly, dt)
 
-            self.node.setPos(target)
-            if displacement.elapsed_time >= duration:
-                self._finish_displacement()
-
-        elif isinstance(displacement, DispByTarget):
-            target = displacement.step(pos, dt, multiplier)
-            target = self._clamp_to_play_area(target)
-            delta = target - pos
-
-            if displacement.rotate_forward:
-                self._set_body_yaw_from_direction(
-                    delta, displacement.rotate_smoothly, dt)
-
-            self.node.setPos(target)
-
-            reached = False
-            target_entity = displacement.target
-            if target_entity is not None:
-                target_pos = getattr(target_entity, "agent_position", None)
-                if target_pos is not None:
-                    remaining = target_pos - target
-                    remaining.z = 0.0
-                    reached = remaining.length() <= displacement.goal_distance + 1e-3
-
-            if (reached or (displacement.cancel_time > 0.0
-                            and displacement.elapsed_time >= displacement.cancel_time)):
-                self._finish_displacement()
+        self.node.setPos(target)
+        if displacement.elapsed_time >= duration:
+            self._finish_displacement()
 
     def _set_body_yaw_from_direction(self, direction: Vec3, smooth: bool,
                                      dt: float) -> None:
@@ -705,8 +525,7 @@ class Player:
         self.node.setH(-self.body_yaw)
 
     def apply_knockback(self, direction: Vec3, distance: float = 1.5,
-                        duration: float = 0.25, ignore_tenacity: bool = False,
-                        on_finish=None) -> DispByDestination:
+                        duration: float = 0.25, on_finish=None) -> DispByDestination:
         heading = Vec3(direction)
         heading.z = 0.0
         if heading.lengthSquared() < 1e-8:
@@ -714,15 +533,12 @@ class Player:
         heading.normalize()
 
         start = self.agent_position
-        target = start + heading * max(0.0, distance)
-        destination = self.project_destination(start, target, True, False)
-
         displacement = DispByDestination(
             duration=max(1e-5, duration),
             ease=DewEase.EaseOutQuad,
-            destination=destination,
+            destination=self.project_destination(
+                start, start + heading * max(0.0, distance)),
             is_friendly=False,
-            is_dodging=False,
             is_canceled_by_cc=True,
             rotate_forward=False,
             on_finish=on_finish,
@@ -736,13 +552,10 @@ class Player:
             return
 
         self._dash_cooldown = max(0.0, self._dash_cooldown - dt)
-        now = time.monotonic()
-        self._process_input(now, camera_yaw)
+        self._process_input(time.monotonic(), camera_yaw)
 
         pos = self.agent_position
         if self.is_displacing:
             self._do_displacement(dt, pos)
         else:
             self._do_movement_processor_frame_update(dt, pos)
-
-        self.node.setPos(self._clamp_to_play_area(self.agent_position))

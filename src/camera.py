@@ -2,27 +2,15 @@
 
 Reconstructed from ``Dew.Core.CameraManager`` / ``FxCameraShake`` with REA.
 
-Implemented pieces
-------------------
-* A follow pivot that chases the player with Unity's SmoothDamp and
-  ``followSmoothTime = 0.05``.
-* A camera yaw (``entityCamAngle``).  Setting it rotates the follow offset and
-  snaps the camera (``SnapCameraToFocusedEntity``).
-* Zoom as a three-body blend (``farZoomBody -> midZoombody -> closeZoomBody``)
-  over ``zoomSteps`` levels, smoothed with ``zoomSmoothTime = 0.2``.
-* ``CameraModifierOffset`` / ``CameraModifierZoom`` local modifiers.
+* A follow pivot chases the player with Unity's SmoothDamp
+  (``followSmoothTime = 0.05``); the camera sits at a fixed offset from it.
+* The angle is fixed: no rotation and no zoom.
 * ``FxCameraShake`` impulse shake with its ``DoShake`` scaling, global
   multipliers and attack/sustain/decay envelope.
 * The damage vignette and the big/small damage shake thresholds.
 
-Controls added by this module
------------------------------
-* Mouse wheel / E / Q : zoom in / out
-* , / .               : rotate ``entityCamAngle`` by 22.5 degrees
-
 Not applicable in this single-player arena: multiplayer spectating,
-occlusion raycasts (there are no obstacles), the lobby/cinematic cameras and
-gamepad rumble.
+occlusion raycasts, the lobby/cinematic cameras and gamepad rumble.
 """
 
 from __future__ import annotations
@@ -41,93 +29,7 @@ from panda3d.core import (
     Vec4,
 )
 
-
-# ---------------------------------------------------------------------------
-# Unity maths ports
-# ---------------------------------------------------------------------------
-
-def clamp01(value: float) -> float:
-    return 0.0 if value < 0.0 else 1.0 if value > 1.0 else value
-
-
-def move_towards(current: float, target: float, max_delta: float) -> float:
-    if abs(target - current) <= max_delta:
-        return target
-    return current + math.copysign(max_delta, target - current)
-
-
-def smooth_damp(current: float, target: float, velocity: float,
-                smooth_time: float, dt: float) -> tuple[float, float]:
-    """Port of Unity's Mathf.SmoothDamp.  Returns ``(value, new_velocity)``."""
-    smooth_time = max(0.0001, smooth_time)
-    omega = 2.0 / smooth_time
-    x = omega * dt
-    exp = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x)
-    change = current - target
-    temp = (velocity + omega * change) * dt
-    velocity = (velocity - omega * temp) * exp
-    output = target + (change + temp) * exp
-    if (target - current > 0.0) == (output > target):      # no overshoot
-        output = target
-        velocity = (output - target) / dt if dt > 0.0 else 0.0
-    return output, velocity
-
-
-def smooth_damp_vec3(current: Vec3, target: Vec3, velocity: Vec3,
-                     smooth_time: float, dt: float) -> tuple[Vec3, Vec3]:
-    out = [0.0, 0.0, 0.0]
-    vel = [0.0, 0.0, 0.0]
-    cur = (current.x, current.y, current.z)
-    tgt = (target.x, target.y, target.z)
-    v = (velocity.x, velocity.y, velocity.z)
-    for i in range(3):
-        out[i], vel[i] = smooth_damp(cur[i], tgt[i], v[i], smooth_time, dt)
-    return Vec3(*out), Vec3(*vel)
-
-
-def rotate_yaw(vector: Vec3, yaw_degrees: float) -> Vec3:
-    """Rotate a vector about +Z using this project's yaw convention.
-
-    yaw 0 = +Y, yaw 90 = +X (matching ``entityCamAngleRotation`` usage).
-    """
-    angle = math.radians(yaw_degrees)
-    c, s = math.cos(angle), math.sin(angle)
-    return Vec3(
-        vector.x * c + vector.y * s,
-        -vector.x * s + vector.y * c,
-        vector.z,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Camera modifiers
-# ---------------------------------------------------------------------------
-
-class CameraModifierBase:
-    """``CameraModifierBase``: a temporary camera offset or zoom override."""
-
-    def apply(self, camera: "FollowCamera"):
-        if self not in camera._camera_modifiers:
-            camera._camera_modifiers.append(self)
-        return self
-
-    def remove(self, camera: "FollowCamera") -> None:
-        if self in camera._camera_modifiers:
-            camera._camera_modifiers.remove(self)
-
-
-class CameraModifierOffset(CameraModifierBase):
-    """Adds a persistent world-space offset to the follow target."""
-
-    def __init__(self, offset: Vec3) -> None:
-        self.offset = Vec3(offset)
-
-
-class CameraModifierZoom(CameraModifierBase):
-    """Overrides the zoom level while present."""
-
-    def __init__(self, zoom_index: float) -> None:
-        self.zoom_index = float(zoom_index)
+from .mathutil import clamp01, move_towards, rotate_yaw, smooth_damp_vec3
 
 
 # ---------------------------------------------------------------------------
@@ -188,34 +90,24 @@ class FollowCamera:
         follow_smooth_time: float = 0.05,
         target_height: float = 1.05,
         fov: float = 55.0,
-        zoom_steps: int = 3,
-        default_zoom_level: int = 1,
-        body_offsets: Optional[tuple[Vec3, Vec3, Vec3]] = None,
     ) -> None:
         self.app = app
         self.camera = app.camera
         self.target = target
         self.world = world
 
-        # --- recovered CameraManager tuning
         self.follow_smooth_time = follow_smooth_time
-        self.zoom_smooth_time = 0.2
-        self.pitch = pitch
-        self.distance = distance
         self.target_height = target_height
-        self.zoom_steps = max(1, int(zoom_steps))
-        self.default_zoom_level = max(
-            0, min(self.zoom_steps - 1, int(default_zoom_level)))
-        self.current_zoom_index = self.default_zoom_level
 
-        self._entity_cam_angle = float(yaw)
+        # Fixed rig: yaw is read by the player for camera-relative input.
+        self.yaw = float(yaw)
+        reach = distance * math.cos(math.radians(pitch))
+        height = distance * math.sin(math.radians(pitch))
+        self._follow_offset = rotate_yaw(Vec3(0.0, -reach, height), self.yaw)
 
         # --- state
         self._pivot = Vec3(0.0, 0.0, 0.0)
         self._pivot_vel = Vec3(0.0, 0.0, 0.0)
-        self._follow_offset = Vec3(0.0, 0.0, 0.0)
-        self._zoom_vel = Vec3(0.0, 0.0, 0.0)
-        self._camera_modifiers: list[CameraModifierBase] = []
         self._shakes: list[_ShakeState] = []
         self._shake_counter = 0.0
 
@@ -241,43 +133,20 @@ class FollowCamera:
         self.shake_sustain_time = 0.1
         self.shake_decay_time = 0.5
         self.shake_delay = 0.0
-        # Authored Cinemachine amplitudes are not world units; these two
-        # scales translate the recovered constants into this project.
+        # Authored Cinemachine amplitudes are not world units; these scales
+        # translate the recovered constants into this project.
         self.shake_world_scale = 0.05
         self.shake_frequency_scale = 18.0
         self.shake_roll_scale = 10.0
         self.is_playing_cutscene = False
 
-        # --- zoom body offsets (the authored values are not in the DLL)
-        if body_offsets is None:
-            self.far_zoom_body = self._make_body(1.35)
-            self.mid_zoom_body = self._make_body(1.0)
-            self.close_zoom_body = self._make_body(0.72)
-        else:
-            self.far_zoom_body, self.mid_zoom_body, self.close_zoom_body = (
-                Vec3(o) for o in body_offsets)
-
         self.app.camLens.setFov(fov)
         self.app.camLens.setNearFar(0.1, 500.0)
 
         self._overlay = self._build_damage_overlay()
-        self._bind_controls()
         self.snap()
 
     # ------------------------------------------------------------------ setup
-    def _bind_controls(self) -> None:
-        self.app.accept("wheel_up", self.zoom_in)
-        self.app.accept("wheel_down", self.zoom_out)
-        self.app.accept("e", self.zoom_in)
-        self.app.accept("q", self.zoom_out)
-        self.app.accept(",", self._rotate_camera, [-22.5])
-        self.app.accept(".", self._rotate_camera, [22.5])
-
-    def _make_body(self, distance_scale: float) -> Vec3:
-        d = self.distance * distance_scale
-        pitch = math.radians(self.pitch)
-        return Vec3(0.0, -d * math.cos(pitch), d * math.sin(pitch))
-
     def _build_damage_overlay(self):
         """A stretched radial vignette drawn in render2d."""
         try:
@@ -310,90 +179,6 @@ class FollowCamera:
             return card
         except Exception:
             return None
-
-    # ------------------------------------------------------------------ target
-    @property
-    def yaw(self) -> float:
-        """Alias used by main.py for camera-relative input."""
-        return self._entity_cam_angle
-
-    @yaw.setter
-    def yaw(self, value: float) -> None:
-        self.set_entity_cam_angle(value)
-
-    @property
-    def entity_cam_angle(self) -> float:
-        return self._entity_cam_angle
-
-    @entity_cam_angle.setter
-    def entity_cam_angle(self, value: float) -> None:
-        self.set_entity_cam_angle(value)
-
-    def set_entity_cam_angle(self, angle: float, snap: bool = True) -> None:
-        """Set the camera yaw; the game always snaps afterwards."""
-        self._entity_cam_angle = float(angle) % 360.0
-        if snap:
-            self.snap()
-
-    def rotate_by_entity_angle(self, vector: Vec3) -> Vec3:
-        """``entityCamAngleRotation * vector`` equivalent."""
-        return rotate_yaw(vector, self._entity_cam_angle)
-
-    def _rotate_camera(self, step: float) -> None:
-        self.set_entity_cam_angle(self._entity_cam_angle + step)
-
-    def _target_point(self) -> Vec3:
-        pos = self.target.getPos(self.app.render)
-        return pos + Vec3(0.0, 0.0, self.target_height)
-
-    def _follow_modifiers(self, target: Vec3) -> Vec3:
-        result = Vec3(target)
-        for modifier in self._camera_modifiers:
-            if isinstance(modifier, CameraModifierOffset):
-                result += modifier.offset
-        return result
-
-    # ------------------------------------------------------------------ zoom
-    def _effective_zoom_index(self) -> float:
-        for modifier in self._camera_modifiers:
-            if isinstance(modifier, CameraModifierZoom):
-                return max(0.0, min(float(self.zoom_steps - 1),
-                                    modifier.zoom_index))
-        return float(self.current_zoom_index)
-
-    def _follow_offset_target(self) -> Vec3:
-        steps = self.zoom_steps
-        if steps <= 1:
-            offset = Vec3(self.mid_zoom_body)
-        else:
-            t = self._effective_zoom_index() / (steps - 1)
-            t = 0.0 if t < 0.0 else 1.0 if t > 1.0 else t
-            if t >= 0.5:
-                blend = t * 2.0 - 1.0
-                offset = self.mid_zoom_body + (
-                    self.close_zoom_body - self.mid_zoom_body) * blend
-            else:
-                blend = t * 2.0
-                offset = self.far_zoom_body + (
-                    self.mid_zoom_body - self.far_zoom_body) * blend
-        return rotate_yaw(offset, self._entity_cam_angle)
-
-    def set_zoom_level(self, index: int) -> None:
-        self.current_zoom_index = max(
-            0, min(self.zoom_steps - 1, int(index)))
-
-    def zoom_in(self) -> None:
-        self.set_zoom_level(self.current_zoom_index + 1)
-
-    def zoom_out(self) -> None:
-        self.set_zoom_level(self.current_zoom_index - 1)
-
-    # ------------------------------------------------------------------ modifiers
-    def add_local_camera_modifier(self, modifier: CameraModifierBase):
-        return modifier.apply(self)
-
-    def remove_local_camera_modifier(self, modifier: CameraModifierBase) -> None:
-        modifier.remove(self)
 
     # ------------------------------------------------------------------ shake
     def do_shake(
@@ -447,19 +232,6 @@ class FollowCamera:
             seed=self._shake_counter * 2.399,
         ))
 
-    def add_shake(self, amplitude: float = 0.15, frequency: float = 22.0,
-                  sustain: float = 0.1, decay: float = 0.5) -> None:
-        """Compatibility helper: amplitude/frequency are in project units."""
-        self.do_shake(
-            amplitude=amplitude / self.shake_world_scale,
-            frequency=frequency / self.shake_frequency_scale,
-            sustain_time=sustain,
-            decay_time=decay,
-        )
-
-    def cancel_all_shakes(self) -> None:
-        self._shakes.clear()
-
     def _update_shakes(self, dt: float) -> None:
         if not self._shakes:
             return
@@ -473,7 +245,7 @@ class FollowCamera:
 
         offset = Vec3(0.0, 0.0, 0.0)
         roll = 0.0
-        angle = math.radians(self._entity_cam_angle)
+        angle = math.radians(self.yaw)
         right = Vec3(math.cos(angle), -math.sin(angle), 0.0)
         up = Vec3(0.0, 0.0, 1.0)
 
@@ -559,24 +331,20 @@ class FollowCamera:
             self._overlay.setColorScale(
                 Vec4(0.55, 0.03, 0.03, self._overlay_alpha))
 
-    @property
-    def damage_overlay_alpha(self) -> float:
-        return self._overlay_alpha
-
     # ------------------------------------------------------------------ update
+    def _target_point(self) -> Vec3:
+        return self.target.getPos(self.app.render) + Vec3(0.0, 0.0, self.target_height)
+
     def snap(self) -> None:
         """``SnapCameraToFocusedEntity``: no smoothing, immediate placement."""
-        self._pivot = self._follow_modifiers(self._target_point())
+        self._pivot = self._target_point()
         self._pivot_vel = Vec3(0.0, 0.0, 0.0)
-        self._follow_offset = self._follow_offset_target()
-        self._zoom_vel = Vec3(0.0, 0.0, 0.0)
         self._apply()
 
     def _apply(self) -> None:
         position = self._pivot + self._follow_offset
         if self.world is not None:
-            ground = self.world.height_at(position.x, position.y)
-            position.z = max(position.z, ground + 1.0)
+            position.z = max(position.z, self.world.height_at(position.x, position.y) + 1.0)
 
         shake, roll = self._shake_offset()
         self.camera.setPos(position + shake)
@@ -587,18 +355,9 @@ class FollowCamera:
     def update(self, dt: float) -> None:
         if dt > 0.0:
             self._poll_health()
-
-            target = self._follow_modifiers(self._target_point())
             self._pivot, self._pivot_vel = smooth_damp_vec3(
-                self._pivot, target, self._pivot_vel,
+                self._pivot, self._target_point(), self._pivot_vel,
                 self.follow_smooth_time, dt)
-
-            zoom_target = self._follow_offset_target()
-            self._follow_offset, self._zoom_vel = smooth_damp_vec3(
-                self._follow_offset, zoom_target, self._zoom_vel,
-                self.zoom_smooth_time, dt)
-
             self._update_shakes(dt)
             self._update_damage_overlay(dt)
-
         self._apply()
