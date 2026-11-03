@@ -18,8 +18,6 @@ from panda3d.core import (
 
 
 class World:
-    """One circular arena and nothing else."""
-
     def __init__(self, app) -> None:
         self.app = app
         self.radius = 7.0

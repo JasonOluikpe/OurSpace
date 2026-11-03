@@ -1,27 +1,9 @@
-"""Displacement, dash and easing framework.
-
-Ported from Shape of Dreams' ``Dew.Core`` (recovered with REA):
-
-* ``Displacement``          - abstract timed movement
-* ``DispByDestination``     - dash / blink towards a point
-* ``DispByTarget``          - chase towards a moving target
-* ``Dash``                  - builder that spawns a ``DispByDestination``
-* ``DashDirection``         - how the dash direction is chosen
-* ``DewEase``               - the game's 32 easing functions
-
-The values in ``Dash`` are the ones recovered from the game:
-
-    distance = 2.25, duration = 0.25  ->  9 units / second
-    ease = Linear, rotateForward = True, useLinearSweep = True
-    affectedByMovementSpeed = False
-"""
-
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol
 
 from panda3d.core import Vec3
 
@@ -171,14 +153,18 @@ def evaluate_ease(ease: DewEase | int, t: float) -> float:
         if t < 0.5:
             return (1.0 - _out_bounce(1.0 - 2.0 * t)) / 2.0
         return (1.0 + _out_bounce(2.0 * t - 1.0)) / 2.0
+    # Overshoot coefficients for cubic back easing (standard values)
+    c1, c3 = 1.70158, 1.70158 * 2.04873
     if ease == DewEase.EaseInBack:
-        return _C3 * t * t * t - _C1 * t * t
+        return t * t * ((c1 + 1) * t - c1)
     if ease == DewEase.EaseOutBack:
-        return 1.0 + _C3 * pow(t - 1.0, 3.0) + _C1 * pow(t - 1.0, 2.0)
+        return 1.0 + (c3 * pow(t - 1.0, 3.0) + c1 * pow(t - 1.0, 2.0))
     if ease == DewEase.EaseInOutBack:
-        if t < 0.5:
-            return (pow(2.0 * t, 2.0) * ((_C1 + 1.0) * 2.0 * t - _C1)) / 2.0
-        return (pow(2.0 * t - 2.0, 2.0) * ((_C1 + 1.0) * (t * 2.0 - 2.0) + _C1) + 2.0) / 2.0
+        half = 0.5
+        t_half_ = 2.0 * t - 1.0
+        if t < half:
+            return pow(2.0 * t, 2) * ((c1 + 1) * 2.0 * t - c1) / 2.0
+        return pow(t_half_, 2) * (c3 * t_half_ + c1) / 2.0
     if ease == DewEase.EaseInElastic:
         return _in_elastic(t)
     if ease == DewEase.EaseOutElastic:
@@ -271,29 +257,44 @@ class DispByDestination(Displacement):
         return start + (end - start) * eased
 
 
+class HasAgentPosition(Protocol):
+    """Anything with a world position (the player, a monster, ...)."""
+
+    @property
+    def agent_position(self) -> Vec3: ...
+
+
 @dataclass
 class DispByTarget(Displacement):
     """Movement towards a moving target (``DispByTarget`` in Dew.Core)."""
 
-    target: object = None
+    target: Optional[HasAgentPosition] = None
     goal_distance: float = 0.0
     speed: float = 10.0
     cancel_time: float = 0.0
 
-    def step(self, current: Vec3, dt: float, speed_multiplier: float = 1.0) -> Vec3:
+    def _flat_delta(self, current: Vec3) -> Optional[Vec3]:
+        """Horizontal vector from ``current`` to the target (None if no target)."""
         if self.target is None:
-            return current
-        target_pos = getattr(self.target, "agent_position", None)
-        if target_pos is None:
-            target_pos = self.target.getPos(self.target.getParent())
-        delta = target_pos - current
+            return None
+        delta = self.target.agent_position - current
         delta.z = 0.0
+        return delta
+
+    def step(self, current: Vec3, dt: float, speed_multiplier: float = 1.0) -> Vec3:
+        delta = self._flat_delta(current)
+        if delta is None:
+            return current
         distance = delta.length()
         if distance <= self.goal_distance or distance < 1e-8:
             return current
         travel = min(max(0.0, self.speed * speed_multiplier * dt),
                      distance - self.goal_distance)
-        return current + delta.normalized() * travel
+        return current + delta * (travel / distance)
+
+    def has_reached(self, current: Vec3) -> bool:
+        delta = self._flat_delta(current)
+        return delta is not None and delta.length() <= self.goal_distance + 1e-3
 
 
 # ---------------------------------------------------------------------------

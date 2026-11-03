@@ -64,6 +64,9 @@ class Gamepad:
     def stick(self) -> tuple[float, float]:
         if self._x is None:
             return 0.0, 0.0
+        # Guard against disconnected gamepad; check _pad before accessing axes.
+        if self._pad is None:
+            return 0.0, 0.0
         # Look the axes up every frame so we always read the live value.
         x = self._pad.findAxis(self._x).value
         y = self._pad.findAxis(self._y).value
@@ -72,8 +75,16 @@ class Gamepad:
         magnitude = math.hypot(x, y)
         if magnitude < DEADZONE:
             return 0.0, 0.0
-        scale = (min(magnitude, 1.0) - DEADZONE) / (1.0 - DEADZONE) / magnitude
-        return x * scale, y * scale
+        # Normalize deadzone to output full range without division by magnitude issues:
+        # At exact deadzone boundary (magnitude == DEADZONE), we scale as 0
+        # As magnitude grows toward 1.0, it scales linearly to full output
+        normalized = min(magnitude - DEADZONE, 1.0 - DEADZONE)
+        scale = normalized / (1.0 - DEADZONE)
+        # Apply direction sign properly and avoid division by zero when near origin
+        if magnitude > 0:
+            return x * scale / max(0.5, magnitude), y * scale / max(0.5, magnitude)
+        # Edge case: exact zero magnitude shouldn't reach here due to deadzone check
+        return 0.0, 0.0
 
     def print_debug(self) -> None:
         if self._pad is None:

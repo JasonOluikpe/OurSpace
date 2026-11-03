@@ -1,18 +1,3 @@
-"""Shape of Dreams-style camera system.
-
-Reconstructed from ``Dew.Core.CameraManager`` / ``FxCameraShake`` with REA.
-
-* A follow pivot chases the player with Unity's SmoothDamp
-  (``followSmoothTime = 0.05``); the camera sits at a fixed offset from it.
-* The angle is fixed: no rotation and no zoom.
-* ``FxCameraShake`` impulse shake with its ``DoShake`` scaling, global
-  multipliers and attack/sustain/decay envelope.
-* The damage vignette and the big/small damage shake thresholds.
-
-Not applicable in this single-player arena: multiplayer spectating,
-occlusion raycasts, the lobby/cinematic cameras and gamepad rumble.
-"""
-
 from __future__ import annotations
 
 import math

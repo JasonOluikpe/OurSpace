@@ -1,30 +1,3 @@
-"""Player movement modelled on Shape of Dreams' ``EntityControl``.
-
-Everything here comes from the REA notes on ``Dew.Core``:
-
-* ``baseAgentSpeed = 5``, ``normalizedAcceleration = 4``,
-  ``rotateSpeed = 720`` deg/s, ``rotationSmoothTime = 0.05``.
-* Acceleration is ``normalizedAcceleration * maxSpeed`` (doubled while
-  slowing down); stopping uses ``clamp(baseSpeed, 0.1, 1000) * 5``.
-* Attacks slow movement to 0.5x, lerping back to 1x over ``duration * 2``.
-* Directional input is camera-relative and uses the game's
-  ``0.4 + 0.6 * strength`` walk-strength curve.
-* Dashing is a ``DispByDestination``: 2.25 units over 0.25 s (9 units/s).
-
-Controls
---------
-* WASD / left stick - camera-relative movement (stick is analog)
-* Left mouse        - click/hold to move to the cursor (destination mode)
-* Space             - dash towards the mouse cursor
-* Cross (PS4)       - dash in the current movement direction
-* F                 - fake attack, triggers the attack movement slow
-* K                 - take a knockback (demonstrates displacement)
-* H / J             - take 10 damage / heal 20 (drives the camera vignette)
-
-Not applicable here: Mirror networking, NavMesh obstacle avoidance (the
-arena is flat and open) and the animation parameter layer.
-"""
-
 from __future__ import annotations
 
 import math
@@ -45,7 +18,14 @@ from panda3d.core import (
     Vec4,
 )
 
-from .displacement import Dash, DashDirection, DewEase, DispByDestination, Displacement
+from .displacement import (
+    Dash,
+    DashDirection,
+    DewEase,
+    DispByDestination,
+    DispByTarget,
+    Displacement,
+)
 from .gamepad import Gamepad
 from .mathutil import (
     delta_angle,
@@ -482,9 +462,7 @@ class Player:
         self.speed = 0.0
         self.local_velocity = Vec3(0.0, 0.0, 0.0)
 
-    def _do_displacement(self, dt: float, pos: Vec3) -> None:
-        displacement = self.displacement
-
+    def _do_displacement(self, displacement: Displacement, dt: float, pos: Vec3) -> None:
         # DoDisplacement cancels when crowd control lands on the entity.
         if displacement.is_canceled_by_cc and (self.is_rooted or self.is_stunned):
             self.cancel_displacement()
@@ -497,17 +475,27 @@ class Player:
             if self.is_hero:
                 multiplier = min(multiplier, 2.5)
 
-        duration = max(1e-5, displacement.duration)
-        target = displacement.position_at(
-            self._disp_start, displacement.elapsed_time / duration, multiplier)
-        target = self._clamp_to_play_area(target)
+        if isinstance(displacement, DispByDestination):
+            duration = max(1e-5, displacement.duration)
+            target = displacement.position_at(
+                self._disp_start, displacement.elapsed_time / duration, multiplier)
+            finished = displacement.elapsed_time >= duration
+        elif isinstance(displacement, DispByTarget):
+            target = displacement.step(pos, dt, multiplier)
+            finished = displacement.has_reached(target) or (
+                displacement.cancel_time > 0.0
+                and displacement.elapsed_time >= displacement.cancel_time)
+        else:
+            self._finish_displacement()
+            return
 
+        target = self._clamp_to_play_area(target)
         if displacement.rotate_forward:
             self._set_body_yaw_from_direction(
                 target - pos, displacement.rotate_smoothly, dt)
 
         self.node.setPos(target)
-        if displacement.elapsed_time >= duration:
+        if finished:
             self._finish_displacement()
 
     def _set_body_yaw_from_direction(self, direction: Vec3, smooth: bool,
@@ -555,7 +543,7 @@ class Player:
         self._process_input(time.monotonic(), camera_yaw)
 
         pos = self.agent_position
-        if self.is_displacing:
-            self._do_displacement(dt, pos)
+        if self.displacement is not None:
+            self._do_displacement(self.displacement, dt, pos)
         else:
             self._do_movement_processor_frame_update(dt, pos)

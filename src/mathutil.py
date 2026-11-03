@@ -23,7 +23,9 @@ def delta_angle(current: float, target: float) -> float:
 
 
 def move_towards_angle(current: float, target: float, max_delta: float) -> float:
-    return current + (move_towards(0.0, delta_angle(current, target), max_delta))
+    # Correctly compute delta towards target while respecting max_delta constraint
+    delta = delta_angle(current, target)
+    return current + math.copysign(min(abs(delta), max_delta), delta)
 
 
 def smooth_damp(current: float, target: float, velocity: float,
