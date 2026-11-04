@@ -6,11 +6,14 @@ from typing import Optional, Sequence
 
 from src.collision import CollisionWorld
 
+
 _NEIGHBOURS = (
     (1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
     (1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)),
     (-1, 1, math.sqrt(2)), (-1, -1, math.sqrt(2)),
 )
+
+PORTAL_MARGIN = 2.5
 
 # (x, y, obstacle-or-None)
 Waypoint = tuple[float, float, object]
@@ -29,6 +32,11 @@ class NavGrid:
         self.nx = int((xmax - xmin) / cell)
         self.ny = int((ymax - ymin) / cell)
 
+        self._cx = [xmin + (i + 0.5) * cell for i in range(self.nx)]
+        self._cy = [ymin + (j + 0.5) * cell for j in range(self.ny)]
+        self._coarse_w = (self.nx + 3) >> 2
+        self._cache_sig = None
+        self._cache = None
         self._static = bytearray(self.nx * self.ny)
         for j in range(self.ny):
             for i in range(self.nx):
@@ -36,7 +44,25 @@ class NavGrid:
                 if collision.blocked(x, y, radius, dynamic=False):
                     self._static[j * self.nx + i] = 1
 
-    # ------------------------------------------------------------------ #
+        # "portals": the area around every door / the fence, whether or not it is broken.
+        # Team routing counts how many minions use each portal so flankers can pick another.
+        self._portal = [0] * (self.nx * self.ny)
+        for k, obs in enumerate(obstacles):
+            rect = getattr(obs, "closed_rect", None) or obs.rect
+            i0, j0 = self.cell_of(rect.x0 - PORTAL_MARGIN, rect.y0 - PORTAL_MARGIN)
+            i1, j1 = self.cell_of(rect.x1 + PORTAL_MARGIN, rect.y1 + PORTAL_MARGIN)
+            for j in range(j0, j1 + 1):
+                for i in range(i0, i1 + 1):
+                    self._portal[j * self.nx + i] = k + 1
+
+    def portals_on(self, xy_list) -> set[int]:
+        out = set()
+        for x, y in xy_list:
+            pid = self._portal[self.index_of(x, y)]
+            if pid:
+                out.add(pid)
+        return out
+
     def center(self, i: int, j: int) -> tuple[float, float]:
         return (self.x0 + (i + 0.5) * self.cell, self.y0 + (j + 0.5) * self.cell)
 
@@ -45,7 +71,25 @@ class NavGrid:
         j = min(max(int((y - self.y0) / self.cell), 0), self.ny - 1)
         return i, j
 
+    def index_of(self, x: float, y: float) -> int:
+        i, j = self.cell_of(x, y)
+        return j * self.nx + i
+
+    def coarse_key(self, x: float, y: float) -> int:
+        """Key of the 2 m x 2 m block containing (x, y). Team-routing penalties live on
+        these blocks, so stepping one cell sideways doesn't dodge them."""
+        i, j = self.cell_of(x, y)
+        return (j >> 2) * self._coarse_w + (i >> 2)
+
     def _stamp(self):
+        """Obstacle state applied on top of the static grid (cached until it changes)."""
+        sig = self.state_signature()
+        if sig != self._cache_sig:
+            self._cache_sig = sig
+            self._cache = self._build_stamp()
+        return self._cache
+
+    def _build_stamp(self):
         grid = bytearray(self._static)
         owner: dict[int, object] = {}
         r = self.radius
@@ -59,7 +103,7 @@ class NavGrid:
                 for i in range(i0, i1 + 1):
                     idx = j * self.nx + i
                     if grid[idx]:
-                        continue # already solid (wall)
+                        continue                      # already solid (wall)
                     x, y = self.center(i, j)
                     cx = min(max(x, rect.x0), rect.x1)
                     cy = min(max(y, rect.y0), rect.y1)
@@ -73,17 +117,25 @@ class NavGrid:
     def state_signature(self) -> tuple:
         return tuple(obs.nav_state() for obs in self.obstacles)
 
-    def find_path(self, start: tuple[float, float], target: tuple[float, float], reach: float = 1.3) -> Optional[list[Waypoint]]:
-        grid, owner = self._stamp()
-        nx, ny = self.nx, self.ny
-        tx, ty = target
+    def find_path(self, start: tuple[float, float], target: tuple[float, float],
+                  reach: float = 1.3, extra_cost: Optional[dict] = None,
+                  extra_weight: float = 1.0, extra_cap: int = 8,
+                  portal_usage: Optional[dict] = None, portal_weight: float = 0.0) -> Optional[list[Waypoint]]:
+        """Cheapest path from `start` to anywhere within `reach` of `target` that has
+        a clear line to it (a closed fence in between does NOT count).
 
-        def goal(i: int, j: int) -> bool:
-            x, y = self.center(i, j)
-            if math.hypot(x - tx, y - ty) > reach:
-                return False
-            sx, sy = self.collision.sweep(x, y, tx, ty, 0.12, step=0.08)
-            return math.hypot(sx - tx, sy - ty) < 0.1
+        Returns waypoints [(x, y, obstacle|None)], [] if already there, or None if
+        unreachable even by breaking things.
+        """
+        grid, owner = self._stamp()
+        extra_cost = extra_cost or {}
+        portal_usage = portal_usage or {}
+        portal = self._portal
+        nx, ny = self.nx, self.ny
+        cx, cy = self._cx, self._cy
+        tx, ty = target
+        hypot = math.hypot
+        sweep = self.collision.sweep
 
         si, sj = self.cell_of(*start)
         if grid[sj * nx + si]:
@@ -91,44 +143,64 @@ class NavGrid:
             if found is None:
                 return None
             si, sj = found
+        start_idx = sj * nx + si
 
-        def h(i: int, j: int) -> float:
-            x, y = self.center(i, j)
-            return math.hypot(x - tx, y - ty)
+        INF = 1e18
+        best = [INF] * (nx * ny)
+        parent = [-1] * (nx * ny)
+        closed = bytearray(nx * ny)
+        best[start_idx] = 0.0
 
-        open_heap = [(h(si, sj), 0.0, si, sj)]
-        best = {(si, sj): 0.0}
-        parent: dict[tuple[int, int], tuple[int, int]] = {}
-        closed = set()
+        heap = [(hypot(cx[si] - tx, cy[sj] - ty), 0.0, start_idx)]
+        push, pop = heapq.heappush, heapq.heappop
+        cell = self.cell
+        coarse_w = self._coarse_w
+        steps = [(di, dj, di + dj * nx, cost * cell) for di, dj, cost in _NEIGHBOURS]
 
-        while open_heap:
-            _, g, i, j = heapq.heappop(open_heap)
-            if (i, j) in closed:
+        while heap:
+            _, g, idx = pop(heap)
+            if closed[idx]:
                 continue
-            closed.add((i, j))
+            closed[idx] = 1
+            j, i = divmod(idx, nx)
 
-            if goal(i, j):
-                cells = [(i, j)]
-                while cells[-1] in parent:
-                    cells.append(parent[cells[-1]])
-                cells.reverse()
-                return [(*self.center(a, b), owner.get(b * nx + a)) for a, b in cells[1:]]
+            if hypot(cx[i] - tx, cy[j] - ty) <= reach:
+                sx, sy = sweep(cx[i], cy[j], tx, ty, 0.12, step=0.08)
+                if hypot(sx - tx, sy - ty) < 0.1:                  # clear line to the target
+                    cells = [idx]
+                    while parent[cells[-1]] != -1:
+                        cells.append(parent[cells[-1]])
+                    cells.reverse()
+                    return [(cx[c % nx], cy[c // nx], owner.get(c)) for c in cells[1:]]
 
-            here_owner = owner.get(j * nx + i)
-            for di, dj, cost in _NEIGHBOURS:
+            here_owner = owner.get(idx)
+            for di, dj, off, step_cost in steps:
                 ni, nj = i + di, j + dj
-                if not (0 <= ni < nx and 0 <= nj < ny) or grid[nj * nx + ni]:
+                if ni < 0 or nj < 0 or ni >= nx or nj >= ny:
                     continue
-                if di and dj and (grid[j * nx + ni] or grid[nj * nx + i]):
-                    continue                      # no cutting corners
-                ng = g + cost * self.cell
-                there_owner = owner.get(nj * nx + ni)
+                nidx = idx + off
+                if grid[nidx] or closed[nidx]:
+                    continue
+                if di and dj and (grid[idx + di] or grid[idx + dj * nx]):
+                    continue                                       # no cutting corners
+                ng = g + step_cost
+                if extra_cost:                                     # team routing
+                    e = extra_cost.get((nj >> 2) * coarse_w + (ni >> 2), 0)
+                    if e:
+                        ng += extra_weight * (e if e < extra_cap else extra_cap)
+                if portal_usage:                                   # flankers avoid the main group's portals
+                    pid = portal[nidx]
+                    if pid and pid != portal[idx]:
+                        u = portal_usage.get(pid, 0)
+                        if u:
+                            ng += portal_weight * (u if u < 6 else 6)
+                there_owner = owner.get(nidx)
                 if there_owner is not None and there_owner is not here_owner:
-                    ng += there_owner.break_cost  # pay once per obstacle crossed
-                if ng < best.get((ni, nj), 1e18):
-                    best[(ni, nj)] = ng
-                    parent[(ni, nj)] = (i, j)
-                    heapq.heappush(open_heap, (ng + h(ni, nj), ng, ni, nj))
+                    ng += there_owner.break_cost                   # pay once per obstacle crossed
+                if ng < best[nidx]:
+                    best[nidx] = ng
+                    parent[nidx] = idx
+                    push(heap, (ng + hypot(cx[ni] - tx, cy[nj] - ty), ng, nidx))
         return None
 
     def _nearest_free(self, grid, i, j, max_ring: int = 3):

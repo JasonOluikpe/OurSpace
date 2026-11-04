@@ -1,27 +1,28 @@
 from __future__ import annotations
-
+ 
 import math
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
-
-
+ 
+ 
 @dataclass(frozen=True)
 class Rect:
     x0: float
     y0: float
     x1: float
     y1: float
-
-
+ 
+ 
 class CollisionWorld:
     def __init__(self, rects: Iterable[Rect], bounds: tuple[float, float, float, float]) -> None:
         self.rects = list(rects)
-        self.bounds = bounds
+        self.bounds = bounds          # (xmin, ymin, xmax, ymax) for circle centers' outer limit
         self._dynamic: list[Callable[[], Optional[Rect]]] = []
-
+ 
     def add_dynamic(self, provider: Callable[[], Optional[Rect]]) -> None:
+        """Register a collider whose rectangle can change (doors). Return None for 'no collider'."""
         self._dynamic.append(provider)
-
+ 
     def _all_rects(self) -> list[Rect]:
         out = list(self.rects)
         for provider in self._dynamic:
@@ -29,7 +30,7 @@ class CollisionWorld:
             if r is not None:
                 out.append(r)
         return out
-
+ 
     def _push_out(self, x: float, y: float, r: float, rect: Rect) -> tuple[float, float, bool]:
         cx = min(max(x, rect.x0), rect.x1)
         cy = min(max(y, rect.y0), rect.y1)
@@ -37,12 +38,13 @@ class CollisionWorld:
         d2 = dx * dx + dy * dy
         if d2 >= r * r:
             return x, y, False
-
+ 
         if d2 > 1e-12:
             d = math.sqrt(d2)
             push = r - d
             return x + dx / d * push, y + dy / d * push, True
-
+ 
+        # circle center is inside the rectangle: leave through the nearest face
         faces = (
             (x - rect.x0, -1.0, 0.0, rect.x0 - r, None),
             (rect.x1 - x, 1.0, 0.0, rect.x1 + r, None),
@@ -51,7 +53,7 @@ class CollisionWorld:
         )
         _, _, _, nx, ny = min(faces, key=lambda f: f[0])
         return (nx if nx is not None else x), (ny if ny is not None else y), True
-
+ 
     def resolve(self, x: float, y: float, radius: float) -> tuple[float, float]:
         rects = self._all_rects()
         for _ in range(4):
@@ -61,35 +63,48 @@ class CollisionWorld:
                 moved = moved or hit
             if not moved:
                 break
-
+ 
         xmin, ymin, xmax, ymax = self.bounds
         x = min(max(x, xmin + radius), xmax - radius)
         y = min(max(y, ymin + radius), ymax - radius)
         return x, y
-
+ 
     def dynamic_rects(self) -> list[Rect]:
         return [r for r in (p() for p in self._dynamic) if r is not None]
-
+ 
     def blocked(self, x: float, y: float, radius: float, dynamic: bool = True) -> bool:
-        r = radius - 1e-3
+        return self._blocked_in(x, y, radius - 1e-3,
+                                self._all_rects() if dynamic else self.rects)
+ 
+    def _blocked_in(self, x: float, y: float, r: float, rects) -> bool:
         xmin, ymin, xmax, ymax = self.bounds
         if x < xmin + r or x > xmax - r or y < ymin + r or y > ymax - r:
             return True
-        for rect in (self._all_rects() if dynamic else self.rects):
-            cx = min(max(x, rect.x0), rect.x1)
-            cy = min(max(y, rect.y0), rect.y1)
-            if (x - cx) ** 2 + (y - cy) ** 2 < r * r:
+        rr = r * r
+        for rect in rects:
+            cx = rect.x0 if x < rect.x0 else (rect.x1 if x > rect.x1 else x)
+            cy = rect.y0 if y < rect.y0 else (rect.y1 if y > rect.y1 else y)
+            dx, dy = x - cx, y - cy
+            if dx * dx + dy * dy < rr:
                 return True
         return False
-
+ 
     def sweep(self, sx: float, sy: float, ex: float, ey: float, radius: float, step: float = 0.05) -> tuple[float, float]:
+        """Furthest point along start->end a circle can reach without hitting anything."""
+        r = radius - 1e-3
+        # broad phase: only rectangles near the segment matter
+        lo_x, hi_x = min(sx, ex) - r, max(sx, ex) + r
+        lo_y, hi_y = min(sy, ey) - r, max(sy, ey) + r
+        rects = [q for q in self._all_rects()
+                 if q.x1 >= lo_x and q.x0 <= hi_x and q.y1 >= lo_y and q.y0 <= hi_y]
+ 
         dist = math.hypot(ex - sx, ey - sy)
         steps = max(1, int(math.ceil(dist / step)))
         last = (sx, sy)
         for i in range(1, steps + 1):
             t = i / steps
             px, py = sx + (ex - sx) * t, sy + (ey - sy) * t
-            if self.blocked(px, py, radius):
+            if self._blocked_in(px, py, r, rects):
                 break
             last = (px, py)
         return last

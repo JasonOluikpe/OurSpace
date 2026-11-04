@@ -19,18 +19,19 @@ from src.doors import DoorManager
 from src.fence import Fence
 from src.meshes import make_box
 
-
 COL_FLOOR   = (0.15, 0.14, 0.13, 1.00)
 COL_WALL    = (0.10, 0.10, 0.11, 1.00)
 COL_COUNTER = (1.00, 1.00, 1.00, 1.00)
 COL_FENCE   = (0.40, 0.40, 0.40, 1.00)
 COL_GRID    = (0.32, 0.40, 0.46, 1.00)
+COL_OUTSIDE = (0.09, 0.10, 0.10, 1.00)
 
-WALL_FADE_ALPHA = 0.18
+WALL_FADE_ALPHA = 0.18      # walls between camera and player fade to this
 WALL_FADE_SPEED = 10.0
 
 
 def _segment_hits_box(p0: Vec3, p1: Vec3, b: layout.Box, pad: float = 0.05) -> bool:
+    """Slab test: does the segment p0->p1 pass through the (padded) box?"""
     lo = (b.x0 - pad, b.y0 - pad, b.z0)
     hi = (b.x1 + pad, b.y1 + pad, b.z1)
     t0, t1 = 0.0, 1.0
@@ -66,8 +67,7 @@ class World:
 
         sx, sy = layout.spawn_point()
         self.spawn = Vec3(sx, sy, 0.0)
-        mx, my = layout.minion_spawn_point()
-        self.minion_spawn = Vec3(mx, my, 0.0)
+        self.player_bounds = layout.walkable_bounds()      # the player stays on the floor
 
         self._build_environment()
         self._build_floor()
@@ -76,7 +76,10 @@ class World:
         self.debris = DebrisField(self.root)
         self._build_labels()
 
-        self.collision = CollisionWorld([Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()],layout.walkable_bounds())
+        self.collision = CollisionWorld(
+            [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()],
+            layout.agent_bounds(),
+        )
 
         # animated doors: they collide while closed / opening, and fade like walls
         self.debris.collision = self.collision
@@ -102,6 +105,7 @@ class World:
         return Vec3((x0 + x1) * 0.5, (y0 + y1) * 0.5, 0.0)
 
     def update(self, dt: float, camera_pos: Vec3, focus: Vec3) -> None:
+        """Fade out walls that sit between the camera and the player."""
         self.doors.update(dt, focus.x, focus.y)
         self.fence.update(dt)
         self.debris.update(dt)
@@ -136,24 +140,22 @@ class World:
     def _build_floor(self) -> None:
         make_box("floor", layout.floor_box(), COL_FLOOR, self.root)
         make_box("balcony-floor", layout.balcony_box(), COL_FLOOR, self.root)
+        make_box("outside", layout.outside_box(), COL_OUTSIDE, self.root)
 
         x0, y_bot, x1, y_top = layout.walkable_bounds()
         ls = LineSegs("floor-grid")
         ls.setColor(*COL_GRID)
         ls.setThickness(1.0)
         x = x0
-        
         while x <= x1 + 1e-6:
             ls.moveTo(x, y_bot, 0.02)
             ls.drawTo(x, y_top, 0.02)
             x += 1.0
         y = y_bot
-
         while y <= y_top + 1e-6:
             ls.moveTo(x0, y, 0.02)
             ls.drawTo(x1, y, 0.02)
             y += 1.0
-
         grid = NodePath(ls.create())
         grid.reparentTo(self.root)
         grid.setLightOff()
