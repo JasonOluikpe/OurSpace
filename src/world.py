@@ -18,8 +18,10 @@ from panda3d.core import (
     Vec4,
 )
 
-from src.layout import *
+from src import layout
 from src.collision import CollisionWorld, Rect
+from src.doors import DoorManager
+from src.meshes import make_box
 
 COL_FLOOR   = (0.15, 0.14, 0.13, 1.00)
 COL_WALL    = (0.10, 0.10, 0.11, 1.00)
@@ -31,42 +33,7 @@ WALL_FADE_ALPHA = 0.18      # walls between camera and player fade to this
 WALL_FADE_SPEED = 10.0
 
 
-def make_box(name: str, b: Box, colour, parent: NodePath) -> NodePath:
-    x0, y0, x1, y1, z0, z1 = b.x0, b.y0, b.x1, b.y1, b.z0, b.z1
-    faces = [
-        ((0, 0, -1), [(x0, y0, z0), (x0, y1, z0), (x1, y1, z0), (x1, y0, z0)]),
-        ((0, 0,  1), [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]),
-        ((0, -1, 0), [(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)]),
-        ((0,  1, 0), [(x1, y1, z0), (x0, y1, z0), (x0, y1, z1), (x1, y1, z1)]),
-        ((-1, 0, 0), [(x0, y1, z0), (x0, y0, z0), (x0, y0, z1), (x0, y1, z1)]),
-        (( 1, 0, 0), [(x1, y0, z0), (x1, y1, z0), (x1, y1, z1), (x1, y0, z1)]),
-    ]
-    vdata = GeomVertexData(name, GeomVertexFormat.getV3n3c4(), Geom.UHStatic)
-    vw = GeomVertexWriter(vdata, "vertex")
-    nw = GeomVertexWriter(vdata, "normal")
-    cw = GeomVertexWriter(vdata, "color")
-    prim = GeomTriangles(Geom.UHStatic)
-
-    i = 0
-    for normal, verts in faces:
-        for v in verts:
-            vw.addData3(*v)
-            nw.addData3(*normal)
-            cw.addData4(*colour)
-        prim.addVertices(i, i + 1, i + 2)
-        prim.addVertices(i, i + 2, i + 3)
-        i += 4
-
-    geom = Geom(vdata)
-    geom.addPrimitive(prim)
-    node = GeomNode(name)
-    node.addGeom(geom)
-    np = NodePath(node)
-    np.reparentTo(parent)
-    return np
-
-
-def _segment_hits_box(p0: Vec3, p1: Vec3, b: Box, pad: float = 0.05) -> bool:
+def _segment_hits_box(p0: Vec3, p1: Vec3, b: layout.Box, pad: float = 0.05) -> bool:
     """Slab test: does the segment p0->p1 pass through the (padded) box?"""
     lo = (b.x0 - pad, b.y0 - pad, b.z0)
     hi = (b.x1 + pad, b.y1 + pad, b.z1)
@@ -88,7 +55,7 @@ def _segment_hits_box(p0: Vec3, p1: Vec3, b: Box, pad: float = 0.05) -> bool:
 
 
 class _FadingWall:
-    def __init__(self, np: NodePath, box: Box) -> None:
+    def __init__(self, np: NodePath, box: layout.Box) -> None:
         self.np = np
         self.box = box
         self.alpha = 1.0
@@ -101,7 +68,7 @@ class World:
         self.walls_root = self.root.attachNewNode("walls")
         self._fading: list[_FadingWall] = []
 
-        sx, sy = spawn_point()
+        sx, sy = layout.spawn_point()
         self.spawn = Vec3(sx, sy, 0.0)
 
         self._build_environment()
@@ -111,9 +78,16 @@ class World:
         self._build_labels()
 
         self.collision = CollisionWorld(
-            [Rect(b.x0, b.y0, b.x1, b.y1) for b in collider_boxes()],
-            walkable_bounds(),
+            [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()],
+            layout.walkable_bounds(),
         )
+
+        # animated doors: they collide while closed / opening, and fade like walls
+        self.doors = DoorManager(self.app, self.root)
+        for provider in self.doors.colliders():
+            self.collision.add_dynamic(provider)
+        for np, box in self.doors.fade_targets():
+            self._fading.append(_FadingWall(np, box))
 
     # ------------------------------------------------------------------ queries
     def height_at(self, x: float, y: float) -> float:
@@ -121,12 +95,13 @@ class World:
 
     @property
     def center(self) -> Vec3:
-        x0, y0, x1, y1 = walkable_bounds()
+        x0, y0, x1, y1 = layout.walkable_bounds()
         return Vec3((x0 + x1) * 0.5, (y0 + y1) * 0.5, 0.0)
 
     # ------------------------------------------------------------------ per-frame
     def update(self, dt: float, camera_pos: Vec3, focus: Vec3) -> None:
         """Fade out walls that sit between the camera and the player."""
+        self.doors.update(dt, focus.x, focus.y)
         k = min(1.0, dt * WALL_FADE_SPEED)
         for w in self._fading:
             target = WALL_FADE_ALPHA if _segment_hits_box(camera_pos, focus, w.box) else 1.0
@@ -157,10 +132,10 @@ class World:
         self.app.render.setLight(key_node)
 
     def _build_floor(self) -> None:
-        make_box("floor", floor_box(), COL_FLOOR, self.root)
-        make_box("balcony-floor", balcony_box(), COL_FLOOR, self.root)
+        make_box("floor", layout.floor_box(), COL_FLOOR, self.root)
+        make_box("balcony-floor", layout.balcony_box(), COL_FLOOR, self.root)
 
-        x0, y_bot, x1, y_top = walkable_bounds()
+        x0, y_bot, x1, y_top = layout.walkable_bounds()
         ls = LineSegs("floor-grid")
         ls.setColor(*COL_GRID)
         ls.setThickness(1.0)
@@ -179,21 +154,21 @@ class World:
         grid.setLightOff()
 
     def _build_walls(self) -> None:
-        for b in wall_boxes():
+        for b in layout.wall_boxes():
             np = make_box("wall", b, COL_WALL, self.walls_root)
             self._fading.append(_FadingWall(np, b))
-        for b in rail_boxes():
+        for b in layout.rail_boxes():
             make_box("rail", b, COL_WALL, self.walls_root)
 
     def _build_kitchen(self) -> None:
-        for b in counter_boxes():
+        for b in layout.counter_boxes():
             make_box("counter", b, COL_COUNTER, self.root)
-        for b in fence_boxes():
+        for b in layout.fence_boxes():
             make_box("fence", b, COL_FENCE, self.root)
 
     def _build_labels(self) -> None:
-        for text, px, py, size in LABELS:
-            x, y = W(px, py)
+        for text, px, py, size in layout.LABELS:
+            x, y = layout.W(px, py)
             tn = TextNode(f"label-{text}")
             tn.setText(text)
             tn.setAlign(TextNode.ACenter)

@@ -1,5 +1,5 @@
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import ClockObject, Vec3, loadPrcFileData
+from panda3d.core import loadPrcFileData, ClockObject, Vec3
 
 from src.camera import FollowCamera
 from src.player import Player
@@ -33,8 +33,7 @@ class Game(ShowBase):
         dt = min(ClockObject.getGlobalClock().getDt(), 1.0 / 60.0)
         self.player.update(dt, self.camera_rig.yaw)
         self.camera_rig.update(dt)
-        self.world.update(dt, self.camera.getPos(self.render),
-                          self.player.agent_position + Vec3(0.0, 0.0, 1.0))
+        self.world.update(dt, self.camera.getPos(self.render), self.player.agent_position + Vec3(0.0, 0.0, 1.0))
         return task.cont
 
 

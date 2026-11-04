@@ -6,6 +6,7 @@ collision system (collision.py) are fed from the functions at the bottom.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 # --------------------------------------------------------------------------- #
@@ -177,3 +178,68 @@ def collider_boxes() -> list[Box]:
 
 def spawn_point() -> tuple[float, float]:
     return W(*SPAWN_PX)
+
+
+# --------------------------------------------------------------------------- #
+#  Doors
+# --------------------------------------------------------------------------- #
+DOOR_HEIGHT = WALL_HEIGHT
+DOOR_THICK = 0.12
+SLIDE_OFFSET = 0.17          # sliding panels sit beside the wall, not in it
+
+
+@dataclass(frozen=True)
+class DoorSpec:
+    name: str
+    kind: str                          # "swing" | "slide"
+    a: tuple[float, float]             # opening start (world xy)
+    b: tuple[float, float]             # opening end   (world xy)
+    # swing
+    hinge_at_b: bool = False           # hinge at b (else at a)
+    open_normal: tuple[float, float] = (0.0, 1.0)   # side the leaf swings toward
+    # slide
+    slide_toward_b: bool = True
+    slide_offset: tuple[float, float] = (0.0, 0.0)  # panel offset from wall centre-line
+    glass: bool = False
+    duration: float = 0.7              # seconds to fully open / close
+
+
+def _opening(p0, p1):
+    """Sketch-pixel gap -> world opening, trimmed by the wall-end overhang."""
+    a, b = W(*p0), W(*p1)
+    length = math.hypot(b[0] - a[0], b[1] - a[1])
+    ux, uy = (b[0] - a[0]) / length, (b[1] - a[1]) / length
+    h = WALL_THICK * 0.5
+    return (a[0] + ux * h, a[1] + uy * h), (b[0] - ux * h, b[1] - uy * h)
+
+
+def door_specs() -> list[DoorSpec]:
+    """The front door / entry has no door."""
+    specs = []
+
+    # bathroom: hinge at the south end, swings INTO the bathroom (east)
+    a, b = _opening((688, 479 - DY / 2), (688, 479 + DY / 2))
+    specs.append(DoorSpec("bathroom", "swing", a, b, hinge_at_b=True,
+                          open_normal=(1.0, 0.0)))
+
+    # closet: swings OUT toward the entry (east)
+    a, b = _opening((587, 497), (587, 497 + DY))
+    specs.append(DoorSpec("closet", "swing", a, b, hinge_at_b=True,
+                          open_normal=(1.0, 0.0)))
+
+    # lower bedroom door: swings INTO the bedroom (north)
+    a, b = _opening((728, 440), (728 + DX, 440))
+    specs.append(DoorSpec("bedroom_lower", "swing", a, b, hinge_at_b=True,
+                          open_normal=(0.0, 1.0)))
+
+    # upper bedroom door: slides south along the wall, on the bedroom side
+    a, b = _opening((629, 280), (629, 280 + DY))
+    specs.append(DoorSpec("bedroom_upper", "slide", a, b, slide_toward_b=True,
+                          slide_offset=(SLIDE_OFFSET, 0.0), duration=1.0))
+
+    # balcony: big glass slider, slides east along the divider on the balcony side
+    a, b = _opening((480, 280), (570, 280))
+    specs.append(DoorSpec("balcony", "slide", a, b, slide_toward_b=True,
+                          slide_offset=(0.0, SLIDE_OFFSET), glass=True,
+                          duration=1.6))
+    return specs

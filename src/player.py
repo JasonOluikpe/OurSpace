@@ -117,7 +117,8 @@ class Player:
         app.accept("space", self._try_dash)
         app.accept("shift", self._try_dash)
 
-        self.gamepad = Gamepad(self.app, self._try_dash)
+        app.accept("e", self._try_interact)   # keyboard fallback for Triangle
+        self.gamepad = Gamepad(self.app, self._try_dash, self._try_interact)
 
     def _set_key(self, key: str, value: int) -> None:
         if key in self.key_map:
@@ -214,6 +215,10 @@ class Player:
         ).apply_by_direction(self, direction)
         
         self._dash_cooldown = self.dash_cooldown
+
+    def _try_interact(self) -> None:
+        pos = self.agent_position
+        self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
 
     def start_displacement(self, displacement: Displacement) -> None:
         if displacement is None or not displacement.is_alive: return
