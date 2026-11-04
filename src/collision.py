@@ -1,10 +1,3 @@
-"""2D circle-vs-rectangle collision for the apartment.
-
-The player is a circle on the XY plane; walls/furniture are axis-aligned
-rectangles. `resolve` pushes a circle out of anything it overlaps (which gives
-natural wall sliding), `sweep` finds how far a straight move can go (used by
-dashes so they cannot tunnel through walls).
-"""
 from __future__ import annotations
 
 import math
@@ -23,9 +16,8 @@ class Rect:
 class CollisionWorld:
     def __init__(self, rects: Iterable[Rect], bounds: tuple[float, float, float, float]) -> None:
         self.rects = list(rects)
-        self.bounds = bounds          # (xmin, ymin, xmax, ymax) for circle centers' outer limit
+        self.bounds = bounds
 
-    # ------------------------------------------------------------------ #
     def _push_out(self, x: float, y: float, r: float, rect: Rect) -> tuple[float, float, bool]:
         cx = min(max(x, rect.x0), rect.x1)
         cy = min(max(y, rect.y0), rect.y1)
@@ -39,7 +31,6 @@ class CollisionWorld:
             push = r - d
             return x + dx / d * push, y + dy / d * push, True
 
-        # circle center is inside the rectangle: leave through the nearest face
         faces = (
             (x - rect.x0, -1.0, 0.0, rect.x0 - r, None),
             (rect.x1 - x, 1.0, 0.0, rect.x1 + r, None),
@@ -63,7 +54,6 @@ class CollisionWorld:
         y = min(max(y, ymin + radius), ymax - radius)
         return x, y
 
-    # ------------------------------------------------------------------ #
     def blocked(self, x: float, y: float, radius: float) -> bool:
         r = radius - 1e-3
         xmin, ymin, xmax, ymax = self.bounds
@@ -76,9 +66,7 @@ class CollisionWorld:
                 return True
         return False
 
-    def sweep(self, sx: float, sy: float, ex: float, ey: float,
-              radius: float, step: float = 0.05) -> tuple[float, float]:
-        """Furthest point along start->end a circle can reach without hitting anything."""
+    def sweep(self, sx: float, sy: float, ex: float, ey: float, radius: float, step: float = 0.05) -> tuple[float, float]:
         dist = math.hypot(ex - sx, ey - sy)
         steps = max(1, int(math.ceil(dist / step)))
         last = (sx, sy)

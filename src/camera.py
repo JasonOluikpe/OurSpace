@@ -23,9 +23,9 @@ class _ShakeState:
         return self.attack + self.sustain + self.decay
 
 class FollowCamera:
-    def __init__(self, app, target, world=None, *, yaw=-20.0, pitch=60.0, distance=26.0, follow_smooth_time=0.05, target_height=1.05, fov=55.0) -> None:
-        self.app = app
-        self.camera = app.camera
+    def __init__(self, game, target, world=None, *, yaw=-20.0, pitch=60.0, distance=26.0, follow_smooth_time=0.05, target_height=1.05, fov=55.0) -> None:
+        self.game = game
+        self.camera = game.camera
         self.target = target
         self.world = world
         self.follow_smooth_time = follow_smooth_time
@@ -53,13 +53,13 @@ class FollowCamera:
         self.shake_frequency_scale = 18.0
         self.shake_roll_scale = 10.0
 
-        self.app.camLens.setFov(fov)
-        self.app.camLens.setNearFar(0.1, 500.0)
+        self.game.camLens.setFov(fov)
+        self.game.camLens.setNearFar(0.1, 500.0)
         self.snap()
 
     def do_shake(self, amplitude: float) -> None:
         self._shake_counter += 1.0
-        self._shakes.append(_ShakeState(
+        self._shakes.gameend(_ShakeState(
             amplitude=amplitude * 1.25,
             frequency=self.shake_frequency * 0.9,
             attack=self.shake_attack_time * 1.25,
@@ -103,14 +103,14 @@ class FollowCamera:
         return offset, roll * self.shake_roll_scale
 
     def _target_point(self) -> Vec3:
-        return self.target.getPos(self.app.render) + Vec3(0.0, 0.0, self.target_height)
+        return self.target.getPos(self.game.render) + Vec3(0.0, 0.0, self.target_height)
 
     def snap(self) -> None:
         self._pivot = self._target_point()
         self._pivot_vel = Vec3(0.0, 0.0, 0.0)
-        self._apply()
+        self._gamely()
 
-    def _apply(self) -> None:
+    def _gamely(self) -> None:
         position = self._pivot + self._follow_offset
         if self.world is not None:
             position.z = max(position.z, self.world.height_at(position.x, position.y) + 1.0)
@@ -127,4 +127,4 @@ class FollowCamera:
                 self._pivot, self._target_point(), self._pivot_vel,
                 self.follow_smooth_time, dt)
             self._update_shakes(dt)
-        self._apply()
+        self._gamely()
