@@ -6,14 +6,13 @@ from typing import Optional, Sequence
 
 from src.collision import CollisionWorld
 
-
 _NEIGHBOURS = (
     (1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
     (1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)),
     (-1, 1, math.sqrt(2)), (-1, -1, math.sqrt(2)),
 )
 
-PORTAL_MARGIN = 2.5
+PORTAL_MARGIN = 2.5           # metres around a door / the fence that count as 'using' it
 
 # (x, y, obstacle-or-None)
 Waypoint = tuple[float, float, object]
@@ -63,6 +62,7 @@ class NavGrid:
                 out.add(pid)
         return out
 
+    # ------------------------------------------------------------------ #
     def center(self, i: int, j: int) -> tuple[float, float]:
         return (self.x0 + (i + 0.5) * self.cell, self.y0 + (j + 0.5) * self.cell)
 
@@ -117,10 +117,12 @@ class NavGrid:
     def state_signature(self) -> tuple:
         return tuple(obs.nav_state() for obs in self.obstacles)
 
+    # ------------------------------------------------------------------ #
     def find_path(self, start: tuple[float, float], target: tuple[float, float],
                   reach: float = 1.3, extra_cost: Optional[dict] = None,
                   extra_weight: float = 1.0, extra_cap: int = 8,
-                  portal_usage: Optional[dict] = None, portal_weight: float = 0.0) -> Optional[list[Waypoint]]:
+                  portal_usage: Optional[dict] = None, portal_weight: float = 0.0,
+                  allow_break: bool = True) -> Optional[list[Waypoint]]:
         """Cheapest path from `start` to anywhere within `reach` of `target` that has
         a clear line to it (a closed fence in between does NOT count).
 
@@ -195,6 +197,8 @@ class NavGrid:
                         if u:
                             ng += portal_weight * (u if u < 6 else 6)
                 there_owner = owner.get(nidx)
+                if there_owner is not None and not allow_break:
+                    continue                                       # e.g. Anna can't break doors
                 if there_owner is not None and there_owner is not here_owner:
                     ng += there_owner.break_cost                   # pay once per obstacle crossed
                 if ng < best[nidx]:

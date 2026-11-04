@@ -32,7 +32,7 @@ class FollowCamera:
 
         self.yaw = float(-20.0)
         self.pitch = 60.0
-        self.distance = 26.0
+        self.distance = 35.0
         
         reach = self.distance * math.cos(math.radians(self.pitch))
         height = self.distance * math.sin(math.radians(self.pitch))
