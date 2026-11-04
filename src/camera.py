@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-
 from dataclasses import dataclass
 
 from panda3d.core import Vec3
@@ -23,17 +22,17 @@ class _ShakeState:
         return self.attack + self.sustain + self.decay
 
 class FollowCamera:
-    def __init__(self, game, target, world=None, *, yaw=-20.0, pitch=60.0, distance=26.0, follow_smooth_time=0.05, target_height=1.05, fov=55.0) -> None:
+    def __init__(self, game, target, world) -> None:
         self.game = game
         self.camera = game.camera
         self.target = target
         self.world = world
-        self.follow_smooth_time = follow_smooth_time
-        self.target_height = target_height
+        self.follow_smooth_time = 0.05
+        self.target_height = 1.05
 
-        self.yaw = float(yaw)
-        self.pitch = pitch
-        self.distance = distance
+        self.yaw = float(-20.0)
+        self.pitch = 60.0
+        self.distance = 26.0
         
         reach = self.distance * math.cos(math.radians(self.pitch))
         height = self.distance * math.sin(math.radians(self.pitch))
@@ -53,7 +52,7 @@ class FollowCamera:
         self.shake_frequency_scale = 18.0
         self.shake_roll_scale = 10.0
 
-        self.game.camLens.setFov(fov)
+        self.game.camLens.setFov(55.0)
         self.game.camLens.setNearFar(0.1, 500.0)
         self.snap()
 
@@ -65,7 +64,7 @@ class FollowCamera:
             attack=self.shake_attack_time * 1.25,
             sustain=self.shake_sustain_time * 1.25,
             decay=self.shake_decay_time * 1.25,
-            seed=self._shake_counter * 2.399,
+            seed=self._shake_counter * 2.399
         ))
 
     def _update_shakes(self, dt: float) -> None:

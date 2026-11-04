@@ -68,6 +68,7 @@ def make_capsule(radius: float, height: float, segments: int = 20, cap_rings: in
     node.addGeom(geom)
     return node
 
+
 class Player:
     def __init__(self, app, world) -> None:
         self.app = app
@@ -137,7 +138,6 @@ class Player:
         return self.displacement is not None
 
     def _clamp_to_play_area(self, point: Vec3) -> Vec3:
-        """Push the player out of walls/furniture and keep them on the floor."""
         point.x, point.y = self.world.collision.resolve(point.x, point.y, self.radius)
         point.z = self.world.height_at(point.x, point.y)
         return point
@@ -208,12 +208,7 @@ class Player:
         else:
             direction = dir_from_yaw(self.body_yaw)
 
-        Dash(
-            distance=self.dash_distance,
-            duration=self.dash_duration,
-            ease=DewEase.Linear,
-        ).apply_by_direction(self, direction)
-        
+        Dash(distance=self.dash_distance, duration=self.dash_duration, ease=DewEase.Linear).apply_by_direction(self, direction)
         self._dash_cooldown = self.dash_cooldown
 
     def _try_interact(self) -> None:

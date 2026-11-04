@@ -1,24 +1,23 @@
-"""Animated doors: swinging leaves and sliding panels, with live collision."""
 from __future__ import annotations
 
 import math
 from typing import Optional
 
-from panda3d.core import NodePath, TransparencyAttrib
+from panda3d.core import NodePath, Point3, TransparencyAttrib
 
 from src import layout
 from src.collision import Rect
+from src.debris import DebrisField, Piece
 from src.layout import Box, DoorSpec
 from src.meshes import make_box
 
+
 COL_DOOR = (0.42, 0.30, 0.20, 1.00)
 COL_GLASS = (0.55, 0.75, 0.85, 0.35)
-
-REACH = 2.5          # how close (m) the player must be to a door to use it
+REACH = 2.5  # how close (m) the player must be to a door to use it
 
 
 def _seg_rect(p, q, thick: float) -> Rect:
-    """Axis-aligned rect around the segment p->q with the given thickness."""
     if abs(q[0] - p[0]) >= abs(q[1] - p[1]):
         return Rect(min(p[0], q[0]), p[1] - thick / 2, max(p[0], q[0]), p[1] + thick / 2)
     return Rect(p[0] - thick / 2, min(p[1], q[1]), p[0] + thick / 2, max(p[1], q[1]))
@@ -34,12 +33,19 @@ def _smooth(p: float) -> float:
 
 
 class Door:
-    def __init__(self, spec: DoorSpec, parent: NodePath) -> None:
+    break_cost = 5.0
+    max_hp = 3
+
+    def __init__(self, spec: DoorSpec, parent: NodePath, debris: DebrisField) -> None:
         self.spec = spec
         self.name = spec.name
+        self.debris = debris
         self.is_open = False          # target state
         self.progress = 0.0           # 0 closed .. 1 open (linear in time)
         self.ease = 0.0               # eased progress, drives visuals + collision
+        self.hp = self.max_hp
+        self.broken = False
+        self._shake = 0.0
 
         ax, ay = spec.a
         bx, by = spec.b
@@ -78,20 +84,18 @@ class Door:
                 panel = Box(x0 - pad, ay + oy - t / 2, x1 + pad, ay + oy + t / 2, 0.0, h)
             else:
                 panel = Box(ax + ox - t / 2, y0 - pad, ax + ox + t / 2, y1 + pad, 0.0, h)
-            mesh = make_box("panel", panel, COL_GLASS if spec.glass else COL_DOOR, self.node)
+            make_box("panel", panel, COL_GLASS if spec.glass else COL_DOOR, self.node)
             if spec.glass:
                 self.node.setTransparency(TransparencyAttrib.MAlpha)
                 self.node.setDepthWrite(False)
             self.open_rect = None
             self.fade_box = None if spec.glass else _union_box(self.closed_rect, self.closed_rect, h)
 
-    # ------------------------------------------------------------------ #
     @property
     def center(self) -> tuple[float, float]:
         return ((self.spec.a[0] + self.spec.b[0]) / 2, (self.spec.a[1] + self.spec.b[1]) / 2)
 
     def distance_to(self, x: float, y: float) -> float:
-        """Distance from a point to the doorway (segment a-b)."""
         ax, ay = self.spec.a
         t = (x - ax) * self.u[0] + (y - ay) * self.u[1]
         t = max(0.0, min(self.length, t))
@@ -103,13 +107,59 @@ class Door:
         return (x - cx) ** 2 + (y - cy) ** 2 < radius * radius
 
     def toggle(self, px: float, py: float, radius: float) -> bool:
+        if self.broken:
+            return False
         if self.is_open and self._player_in_doorway(px, py, radius):
             return False                  # don't close it on top of the player
         self.is_open = not self.is_open
         return True
 
-    # ------------------------------------------------------------------ #
+    def hit(self, from_xy) -> bool:
+        if self.broken:
+            return False
+        self.hp -= 1
+        self._shake = 0.25
+        if self.hp <= 0:
+            self.break_(from_xy)
+            return True
+        return False
+
+    def _pieces(self) -> list[Piece]:
+        spec, L, H, t = self.spec, self.length, layout.DOOR_HEIGHT, layout.DOOR_THICK
+        nx = max(2, int(round(L / 0.6)))
+        nz = 6
+        pw, ph = L / nx, H / nz
+        colour = COL_GLASS if spec.glass else COL_DOOR
+        parent = self.node.getParent()
+        out = []
+        for i in range(nx):
+            for k in range(nz):
+                lx, lz = (i + 0.5) * pw, (k + 0.5) * ph
+                if spec.kind == "swing":
+                    pt = parent.getRelativePoint(self.node, Point3(lx, 0.0, lz))
+                    heading = self.node.getH()
+                else:
+                    ax, ay = spec.a
+                    ox, oy = spec.slide_offset
+                    sp = self.node.getPos()
+                    pt = Point3(ax + self.u[0] * lx + ox + sp.x,
+                                ay + self.u[1] * lx + oy + sp.y, lz)
+                    heading = math.degrees(math.atan2(self.u[1], self.u[0]))
+                out.append(Piece((pt.x, pt.y, pt.z), heading, (pw * 0.94, ph * 0.94, t), colour))
+        return out
+
+    def break_(self, from_xy) -> None:
+        if self.broken:
+            return
+        self.broken = True
+        self.is_open = False
+        pieces = self._pieces() # built from the door's current pose
+        self.node.hide()
+        self.debris.shatter(pieces, from_xy)
+
     def update(self, dt: float) -> None:
+        if self.broken:
+            return
         target = 1.0 if self.is_open else 0.0
         step = dt / self.spec.duration
         if self.progress < target:
@@ -118,13 +168,22 @@ class Door:
             self.progress = max(target, self.progress - step)
         self.ease = _smooth(self.progress)
 
+        jitter = 0.0
+        if self._shake > 0.0:
+            self._shake = max(0.0, self._shake - dt)
+            jitter = math.sin(self._shake * 70.0) * (self._shake / 0.25)
+
         if self.spec.kind == "swing":
-            self.node.setH(self._a0 + self._delta * self.ease)
+            self.node.setH(self._a0 + self._delta * self.ease + jitter * 2.5)
         else:
             s = self.ease * self.length
-            self.node.setPos(self._slide_dir[0] * s, self._slide_dir[1] * s, 0.0)
+            nxv, nyv = -self.u[1], self.u[0]      # shake across the door
+            self.node.setPos(self._slide_dir[0] * s + nxv * jitter * 0.06,
+                             self._slide_dir[1] * s + nyv * jitter * 0.06, 0.0)
 
     def collider(self) -> Optional[Rect]:
+        if self.broken:
+            return None
         if self.spec.kind == "swing":
             return self.closed_rect if self.ease < 0.5 else self.open_rect
 
@@ -138,10 +197,17 @@ class Door:
         q = (ax + self.u[0] * t1, ay + self.u[1] * t1)
         return _seg_rect(p, q, layout.WALL_THICK)
 
+    def nav_state(self):
+        if self.broken:
+            return (None, False)
+        if self.is_open:
+            return (self.open_rect, False) if self.spec.kind == "swing" else (None, False)
+        return (self.closed_rect, True)
+
 
 class DoorManager:
-    def __init__(self, app, parent: NodePath) -> None:
-        self.doors = [Door(spec, parent) for spec in layout.door_specs()]
+    def __init__(self, app, parent: NodePath, debris: DebrisField) -> None:
+        self.doors = [Door(spec, parent, debris) for spec in layout.door_specs()]
         self._near: Optional[Door] = None
 
         self.prompt = None
@@ -161,6 +227,8 @@ class DoorManager:
     def nearest(self, x: float, y: float) -> Optional[Door]:
         best, best_d = None, REACH
         for d in self.doors:
+            if d.broken:
+                continue
             dist = d.distance_to(x, y)
             if dist < best_d:
                 best, best_d = d, dist

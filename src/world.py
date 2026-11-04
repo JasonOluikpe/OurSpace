@@ -4,12 +4,6 @@ from panda3d.core import (
     AmbientLight,
     AntialiasAttrib,
     DirectionalLight,
-    Geom,
-    GeomNode,
-    GeomTriangles,
-    GeomVertexData,
-    GeomVertexFormat,
-    GeomVertexWriter,
     LineSegs,
     NodePath,
     TextNode,
@@ -20,8 +14,11 @@ from panda3d.core import (
 
 from src import layout
 from src.collision import CollisionWorld, Rect
+from src.debris import DebrisField
 from src.doors import DoorManager
+from src.fence import Fence
 from src.meshes import make_box
+
 
 COL_FLOOR   = (0.15, 0.14, 0.13, 1.00)
 COL_WALL    = (0.10, 0.10, 0.11, 1.00)
@@ -29,12 +26,11 @@ COL_COUNTER = (1.00, 1.00, 1.00, 1.00)
 COL_FENCE   = (0.40, 0.40, 0.40, 1.00)
 COL_GRID    = (0.32, 0.40, 0.46, 1.00)
 
-WALL_FADE_ALPHA = 0.18      # walls between camera and player fade to this
+WALL_FADE_ALPHA = 0.18
 WALL_FADE_SPEED = 10.0
 
 
 def _segment_hits_box(p0: Vec3, p1: Vec3, b: layout.Box, pad: float = 0.05) -> bool:
-    """Slab test: does the segment p0->p1 pass through the (padded) box?"""
     lo = (b.x0 - pad, b.y0 - pad, b.z0)
     hi = (b.x1 + pad, b.y1 + pad, b.z1)
     t0, t1 = 0.0, 1.0
@@ -76,22 +72,27 @@ class World:
         self._build_environment()
         self._build_floor()
         self._build_walls()
-        self._build_kitchen()
+        self._build_counter()
+        self.debris = DebrisField(self.root)
         self._build_labels()
 
-        self.collision = CollisionWorld(
-            [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()],
-            layout.walkable_bounds(),
-        )
+        self.collision = CollisionWorld([Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()],layout.walkable_bounds())
 
         # animated doors: they collide while closed / opening, and fade like walls
-        self.doors = DoorManager(self.app, self.root)
+        self.debris.collision = self.collision
+        self.doors = DoorManager(self.app, self.root, self.debris)
         for provider in self.doors.colliders():
             self.collision.add_dynamic(provider)
+
+        # the dog fence is dynamic too (it can be broken)
+        self.fence = Fence(self.root, self.debris)
+        self.collision.add_dynamic(self.fence.collider)
+
+        # everything a minion is able to break
+        self.obstacles = list(self.doors.doors) + [self.fence]
         for np, box in self.doors.fade_targets():
             self._fading.append(_FadingWall(np, box))
 
-    # ------------------------------------------------------------------ queries
     def height_at(self, x: float, y: float) -> float:
         return 0.0
 
@@ -100,10 +101,10 @@ class World:
         x0, y0, x1, y1 = layout.walkable_bounds()
         return Vec3((x0 + x1) * 0.5, (y0 + y1) * 0.5, 0.0)
 
-    # ------------------------------------------------------------------ per-frame
     def update(self, dt: float, camera_pos: Vec3, focus: Vec3) -> None:
-        """Fade out walls that sit between the camera and the player."""
         self.doors.update(dt, focus.x, focus.y)
+        self.fence.update(dt)
+        self.debris.update(dt)
         k = min(1.0, dt * WALL_FADE_SPEED)
         for w in self._fading:
             target = WALL_FADE_ALPHA if _segment_hits_box(camera_pos, focus, w.box) else 1.0
@@ -118,7 +119,6 @@ class World:
                 w.np.setDepthWrite(False)
                 w.np.setAlphaScale(w.alpha)
 
-    # ------------------------------------------------------------------ visuals
     def _build_environment(self) -> None:
         self.app.setBackgroundColor(Vec4(0.06, 0.07, 0.08, 1.0))
         self.app.render.setAntialias(AntialiasAttrib.MMultisample)
@@ -142,15 +142,18 @@ class World:
         ls.setColor(*COL_GRID)
         ls.setThickness(1.0)
         x = x0
+        
         while x <= x1 + 1e-6:
             ls.moveTo(x, y_bot, 0.02)
             ls.drawTo(x, y_top, 0.02)
             x += 1.0
         y = y_bot
+
         while y <= y_top + 1e-6:
             ls.moveTo(x0, y, 0.02)
             ls.drawTo(x1, y, 0.02)
             y += 1.0
+
         grid = NodePath(ls.create())
         grid.reparentTo(self.root)
         grid.setLightOff()
@@ -162,11 +165,9 @@ class World:
         for b in layout.rail_boxes():
             make_box("rail", b, COL_WALL, self.walls_root)
 
-    def _build_kitchen(self) -> None:
+    def _build_counter(self) -> None:
         for b in layout.counter_boxes():
             make_box("counter", b, COL_COUNTER, self.root)
-        for b in layout.fence_boxes():
-            make_box("fence", b, COL_FENCE, self.root)
 
     def _build_labels(self) -> None:
         for text, px, py, size in layout.LABELS:

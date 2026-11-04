@@ -1,14 +1,8 @@
-"""Grid A* pathfinding over the collision world.
-
-Static geometry is baked into a grid once. Door colliders change at runtime, so
-they are stamped onto a copy of the grid at the start of each search: closed
-doors block, open doors don't.
-"""
 from __future__ import annotations
 
 import heapq
 import math
-from typing import Optional
+from typing import Optional, Sequence
 
 from src.collision import CollisionWorld
 
@@ -18,12 +12,17 @@ _NEIGHBOURS = (
     (-1, 1, math.sqrt(2)), (-1, -1, math.sqrt(2)),
 )
 
+# (x, y, obstacle-or-None)
+Waypoint = tuple[float, float, object]
+
 
 class NavGrid:
-    def __init__(self, collision: CollisionWorld, radius: float, cell: float = 0.5) -> None:
+    def __init__(self, collision: CollisionWorld, radius: float,
+                 obstacles: Sequence = (), cell: float = 0.5) -> None:
         self.collision = collision
         self.radius = radius
         self.cell = cell
+        self.obstacles = obstacles
 
         xmin, ymin, xmax, ymax = collision.bounds
         self.x0, self.y0 = xmin, ymin
@@ -46,33 +45,36 @@ class NavGrid:
         j = min(max(int((y - self.y0) / self.cell), 0), self.ny - 1)
         return i, j
 
-    def _with_doors(self) -> bytearray:
+    def _stamp(self):
         grid = bytearray(self._static)
+        owner: dict[int, object] = {}
         r = self.radius
-        for rect in self.collision.dynamic_rects():
+        for obs in self.obstacles:
+            rect, breakable = obs.nav_state()
+            if rect is None:
+                continue
             i0, j0 = self.cell_of(rect.x0 - r, rect.y0 - r)
             i1, j1 = self.cell_of(rect.x1 + r, rect.y1 + r)
             for j in range(j0, j1 + 1):
                 for i in range(i0, i1 + 1):
+                    idx = j * self.nx + i
+                    if grid[idx]:
+                        continue # already solid (wall)
                     x, y = self.center(i, j)
                     cx = min(max(x, rect.x0), rect.x1)
                     cy = min(max(y, rect.y0), rect.y1)
                     if (x - cx) ** 2 + (y - cy) ** 2 < r * r:
-                        grid[j * self.nx + i] = 1
-        return grid
+                        if breakable:
+                            owner[idx] = obs
+                        else:
+                            grid[idx] = 1
+        return grid, owner
 
-    def door_signature(self) -> tuple:
-        return tuple(self.collision.dynamic_rects())
+    def state_signature(self) -> tuple:
+        return tuple(obs.nav_state() for obs in self.obstacles)
 
-    # ------------------------------------------------------------------ #
-    def find_path(self, start: tuple[float, float], target: tuple[float, float],
-                  reach: float = 1.3) -> Optional[list[tuple[float, float]]]:
-        """Path from `start` to anywhere within `reach` of `target` that has a
-        clear line to it (so a fence between them does NOT count as reachable).
-
-        Returns waypoints (world xy), [] if already there, or None if unreachable.
-        """
-        grid = self._with_doors()
+    def find_path(self, start: tuple[float, float], target: tuple[float, float], reach: float = 1.3) -> Optional[list[Waypoint]]:
+        grid, owner = self._stamp()
         nx, ny = self.nx, self.ny
         tx, ty = target
 
@@ -106,12 +108,13 @@ class NavGrid:
             closed.add((i, j))
 
             if goal(i, j):
-                path = [(i, j)]
-                while path[-1] in parent:
-                    path.append(parent[path[-1]])
-                path.reverse()
-                return [self.center(a, b) for a, b in path[1:]]
+                cells = [(i, j)]
+                while cells[-1] in parent:
+                    cells.append(parent[cells[-1]])
+                cells.reverse()
+                return [(*self.center(a, b), owner.get(b * nx + a)) for a, b in cells[1:]]
 
+            here_owner = owner.get(j * nx + i)
             for di, dj, cost in _NEIGHBOURS:
                 ni, nj = i + di, j + dj
                 if not (0 <= ni < nx and 0 <= nj < ny) or grid[nj * nx + ni]:
@@ -119,6 +122,9 @@ class NavGrid:
                 if di and dj and (grid[j * nx + ni] or grid[nj * nx + i]):
                     continue                      # no cutting corners
                 ng = g + cost * self.cell
+                there_owner = owner.get(nj * nx + ni)
+                if there_owner is not None and there_owner is not here_owner:
+                    ng += there_owner.break_cost  # pay once per obstacle crossed
                 if ng < best.get((ni, nj), 1e18):
                     best[(ni, nj)] = ng
                     parent[(ni, nj)] = (i, j)

@@ -1,10 +1,10 @@
 import math
 from panda3d.core import InputDevice
 
+
 DEADZONE = 0.2
 
 class Gamepad:
-    # PS4 Triangle maps to the 'top' face button (face_y in Panda3D's layout)
     INTERACT_EVENTS = (
         "gamepad-face_y",
         "gamepad-face-y",
@@ -13,19 +13,19 @@ class Gamepad:
         "gamepad-button-3",
     )
 
-    def __init__(self, app, on_dash, on_interact=None) -> None:
-        self.app = app
+    def __init__(self, game, on_dash, on_interact=None) -> None:
+        self.game = game
         self._on_dash = on_dash
         self._on_interact = on_interact
         self._pad = None
 
-        app.accept("connect-device", self._connected)
-        app.accept("disconnect-device", self._disconnected)
+        game.accept("connect-device", self._connected)
+        game.accept("disconnect-device", self._disconnected)
 
         # Check both gamepad and generic unknown HID devices (common for PS4 on Windows)
-        for pad in app.devices.getDevices(InputDevice.DeviceClass.gamepad):
+        for pad in game.devices.getDevices(InputDevice.DeviceClass.gamepad):
             self._connected(pad)
-        for pad in app.devices.getDevices(InputDevice.DeviceClass.unknown):
+        for pad in game.devices.getDevices(InputDevice.DeviceClass.unknown):
             self._connected(pad)
 
     def _connected(self, device) -> None:
@@ -36,9 +36,9 @@ class Gamepad:
             return
             
         self._pad = device
-        self.app.attachInputDevice(device, prefix="gamepad")
+        self.game.attachInputDevice(device, prefix="gamepad")
         
-        # Bind multiple variations of face/action buttons across different SDL/Panda3D backend mappings
+        # Bind multiple variations of face/action buttons across different SDL/Panda3D backend mgameings
         for event_name in (
             "gamepad-face-a",
             "gamepad-face_a",
@@ -46,12 +46,12 @@ class Gamepad:
             "gamepad-south",
             "gamepad-button-0",
         ):
-            self.app.accept(event_name, self._on_dash)
+            self.game.accept(event_name, self._on_dash)
 
         # Triangle (top face button) = interact / open doors
         if self._on_interact is not None:
             for event_name in self.INTERACT_EVENTS:
-                self.app.accept(event_name, self._on_interact)
+                self.game.accept(event_name, self._on_interact)
 
     def _disconnected(self, device) -> None:
         if device is not self._pad: 
@@ -63,10 +63,10 @@ class Gamepad:
             "gamepad-south",
             "gamepad-button-0",
         ):
-            self.app.ignore(event_name)
+            self.game.ignore(event_name)
         for event_name in self.INTERACT_EVENTS:
-            self.app.ignore(event_name)
-        self.app.detachInputDevice(device)
+            self.game.ignore(event_name)
+        self.game.detachInputDevice(device)
         self._pad = None
 
     def stick(self) -> tuple[float, float]:
@@ -97,7 +97,7 @@ class Gamepad:
         # Removed the negative sign so pushing up moves the player up
         y = y
         
-        # Apply deadzone and normalize
+        # gamely deadzone and normalize
         mag = math.hypot(x, y)
         if mag < DEADZONE:
             return 0.0, 0.0
