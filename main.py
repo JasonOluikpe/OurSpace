@@ -24,14 +24,7 @@ class Game(ShowBase):
 
         self.world = World(self)
         self.player = Player(self, self.world)
-        self.camera_rig = FollowCamera(
-            self,
-            self.player.node,
-            self.world,
-            yaw=45.0,
-            pitch=60.0,
-            distance=26.0,
-        )
+        self.camera_rig = FollowCamera(self, self.player.node, self.world)
 
         self.accept('escape', self.userExit)
         self.taskMgr.add(self._update, 'update')
