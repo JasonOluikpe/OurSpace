@@ -23,7 +23,7 @@ class _ShakeState:
         return self.attack + self.sustain + self.decay
 
 class FollowCamera:
-    def __init__(self, app, target, world=None, *, yaw=45.0, pitch=60.0, distance=26.0, follow_smooth_time=0.05, target_height=1.05, fov=55.0) -> None:
+    def __init__(self, app, target, world=None, *, yaw=-20.0, pitch=60.0, distance=26.0, follow_smooth_time=0.05, target_height=1.05, fov=55.0) -> None:
         self.app = app
         self.camera = app.camera
         self.target = target

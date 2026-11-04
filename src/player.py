@@ -72,6 +72,7 @@ class Player:
     def __init__(self, app, world) -> None:
         self.app = app
         self.world = world
+        self.radius = 0.4
 
         self.base_agent_speed = 5.0
         self.normalized_acceleration = 4.0
@@ -98,7 +99,7 @@ class Player:
         self.node = app.render.attachNewNode("player")
         self.node.setPos(world.spawn.x, world.spawn.y, world.spawn.z)
 
-        self.model = self.node.attachNewNode(make_capsule(radius=0.4, height=1.8))
+        self.model = self.node.attachNewNode(make_capsule(radius=self.radius, height=1.8))
         self.model.setTwoSided(True)
 
         material = Material()
@@ -135,39 +136,16 @@ class Player:
         return self.displacement is not None
 
     def _clamp_to_play_area(self, point: Vec3) -> Vec3:
-        radius = math.hypot(point.x, point.y)
-        limit = self.world.play_radius
-        if radius > limit and radius > 1e-8:
-            scale = limit / radius
-            point.x *= scale
-            point.y *= scale
+        """Push the player out of walls/furniture and keep them on the floor."""
+        point.x, point.y = self.world.collision.resolve(point.x, point.y, self.radius)
         point.z = self.world.height_at(point.x, point.y)
         return point
 
     def project_destination(self, start: Vec3, target: Vec3, use_linear_sweep: bool = True, can_go_over_terrain: bool = False) -> Vec3:
-        limit = self.world.play_radius
-        end = Vec3(target)
-        if end.x * end.x + end.y * end.y <= limit * limit:
-            return self._clamp_to_play_area(end)
-
         if use_linear_sweep and not can_go_over_terrain:
-            direction = end - start
-            a = direction.x * direction.x + direction.y * direction.y
-            if a < 1e-8: return self._clamp_to_play_area(Vec3(start))
-            
-            b = 2.0 * (start.x * direction.x + start.y * direction.y)
-            c = start.x * start.x + start.y * start.y - limit * limit
-            discriminant = b * b - 4.0 * a * c
-            
-            if discriminant <= 0.0: return self._clamp_to_play_area(Vec3(start))
-            
-            t = (-b + math.sqrt(discriminant)) / (2.0 * a)
-            result = start + direction * max(0.0, min(1.0, t))
-        else:
-            length = math.hypot(end.x, end.y)
-            result = Vec3(0.0, 0.0, 0.0) if length < 1e-8 else Vec3(end.x * limit / length, end.y * limit / length, 0.0)
-
-        return self._clamp_to_play_area(result)
+            x, y = self.world.collision.sweep(start.x, start.y, target.x, target.y, self.radius)
+            return self._clamp_to_play_area(Vec3(x, y, 0.0))
+        return self._clamp_to_play_area(Vec3(target))
 
     def _process_input(self, camera_yaw: float) -> None:
         gx, gy = self.gamepad.stick()
