@@ -70,6 +70,8 @@ class World:
 
         sx, sy = layout.spawn_point()
         self.spawn = Vec3(sx, sy, 0.0)
+        mx, my = layout.minion_spawn_point()
+        self.minion_spawn = Vec3(mx, my, 0.0)
 
         self._build_environment()
         self._build_floor()

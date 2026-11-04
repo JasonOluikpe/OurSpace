@@ -78,12 +78,15 @@ class CollisionWorld:
         return x, y
 
     # ------------------------------------------------------------------ #
-    def blocked(self, x: float, y: float, radius: float) -> bool:
+    def dynamic_rects(self) -> list[Rect]:
+        return [r for r in (p() for p in self._dynamic) if r is not None]
+
+    def blocked(self, x: float, y: float, radius: float, dynamic: bool = True) -> bool:
         r = radius - 1e-3
         xmin, ymin, xmax, ymax = self.bounds
         if x < xmin + r or x > xmax - r or y < ymin + r or y > ymax - r:
             return True
-        for rect in self._all_rects():
+        for rect in (self._all_rects() if dynamic else self.rects):
             cx = min(max(x, rect.x0), rect.x1)
             cy = min(max(y, rect.y0), rect.y1)
             if (x - cx) ** 2 + (y - cy) ** 2 < r * r:

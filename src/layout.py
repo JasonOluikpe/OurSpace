@@ -84,7 +84,8 @@ LABELS = (
     ("BALCONY",     615, 258, 1.00),
 )
 
-SPAWN_PX = (645, 505)
+SPAWN_PX = (515, 335)            # player: living room
+MINION_SPAWN_PX = (645, 505)     # minion: entry
 
 
 # --------------------------------------------------------------------------- #
@@ -178,6 +179,10 @@ def collider_boxes() -> list[Box]:
 
 def spawn_point() -> tuple[float, float]:
     return W(*SPAWN_PX)
+
+
+def minion_spawn_point() -> tuple[float, float]:
+    return W(*MINION_SPAWN_PX)
 
 
 # --------------------------------------------------------------------------- #
