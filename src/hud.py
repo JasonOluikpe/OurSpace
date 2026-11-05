@@ -4,6 +4,9 @@ import os
 
 from panda3d.core import Filename, TextNode, TransparencyAttrib
 
+
+RED = (0.92, 0.10, 0.08, 1.0)
+DARK_RED = (0.25, 0.0, 0.0, 1.0)
 _BOLD_FONT_CANDIDATES = (
     "C:/Windows/Fonts/arialbd.ttf",
     "C:/Windows/Fonts/segoeuib.ttf",
@@ -13,10 +16,7 @@ _BOLD_FONT_CANDIDATES = (
     "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
 )
 
-RED = (0.92, 0.10, 0.08, 1.0)
-DARK_RED = (0.25, 0.0, 0.0, 1.0)
-
-
+# falls back to Panda's default font with a heavy shadow if no bold system font exists
 def _load_bold_font(loader):
     for path in _BOLD_FONT_CANDIDATES:
         if os.path.exists(path):
@@ -26,21 +26,21 @@ def _load_bold_font(loader):
                 font = None
             if font is not None and font.isValid():
                 return font
-    return None          # falls back to Panda's default font + a heavy shadow
+    return None
 
 
 class WaveBanner:
-    ANNOUNCE_HOLD = 2.5 # seconds fully visible
+    ANNOUNCE_HOLD = 2.5
     ANNOUNCE_FADE = 1.0
 
     def __init__(self, app) -> None:
-        self.title_text = ''
-        self.countdown_text = ''
+        self.title_text = ""
+        self.countdown_text = ""
         self._announce_age = None
         self.title = self.countdown = None
 
         aspect2d = getattr(app, "aspect2d", None)
-        if aspect2d is None:                 # headless
+        if aspect2d is None:
             return
 
         from direct.gui.OnscreenText import OnscreenText
@@ -53,7 +53,7 @@ class WaveBanner:
                 kw["font"] = font
             t = OnscreenText(**kw)
             t.setTransparency(TransparencyAttrib.MAlpha)
-            if font is None:                 # fake bold: heavy outline-ish shadow
+            if font is None:
                 t.textNode.setShadow(0.04, 0.04)
             return t
 

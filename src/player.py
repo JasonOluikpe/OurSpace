@@ -109,7 +109,6 @@ class Player:
         material.setShininess(28.0)
         self.model.setMaterial(material, 1)
 
-        # Keyboard state tracking
         self.key_map = {"w": 0, "s": 0, "a": 0, "d": 0, "arrow_up": 0, "arrow_down": 0, "arrow_left": 0, "arrow_right": 0}
         for key in self.key_map:
             app.accept(key, self._set_key, [key, 1])
@@ -117,8 +116,11 @@ class Player:
         app.accept("space", self._try_dash)
         app.accept("shift", self._try_dash)
 
-        app.accept("e", self._try_interact)   # keyboard fallback for Triangle
-        self.gamepad = Gamepad(self.app, self._try_dash, self._try_interact)
+        self._interact_down = False
+        self._hold_time = 0.0
+        app.accept("e", self._interact_press)
+        app.accept("e-up", self._interact_release)
+        self.gamepad = Gamepad(self.app, self._try_dash, self._interact_press, self._interact_release)
 
     def _set_key(self, key: str, value: int) -> None:
         if key in self.key_map:
@@ -137,9 +139,8 @@ class Player:
         return self.displacement is not None
 
     def _clamp_to_play_area(self, point: Vec3) -> Vec3:
-        """Push the player out of walls/furniture and keep them on the floor."""
         x, y = self.world.collision.resolve(point.x, point.y, self.radius)
-        xmin, ymin, xmax, ymax = self.world.player_bounds     # the player can't leave the apartment
+        xmin, ymin, xmax, ymax = self.world.player_bounds
         point.x = min(max(x, xmin + self.radius), xmax - self.radius)
         point.y = min(max(y, ymin + self.radius), ymax - self.radius)
         point.z = self.world.height_at(point.x, point.y)
@@ -153,10 +154,10 @@ class Player:
 
     def _process_input(self, camera_yaw: float) -> None:
         gx, gy = self.gamepad.stick()
-        
+
         kx = float(self.key_map["d"] or self.key_map["arrow_right"]) - float(self.key_map["a"] or self.key_map["arrow_left"])
         ky = float(self.key_map["w"] or self.key_map["arrow_up"]) - float(self.key_map["s"] or self.key_map["arrow_down"])
-        
+
         ix = gx if abs(gx) > 1e-5 else kx
         iy = gy if abs(gy) > 1e-5 else ky
 
@@ -205,23 +206,31 @@ class Player:
     def _try_dash(self) -> None:
         if self.is_displacing or self._dash_cooldown > 0.0:
             return
-            
+
         if self._movement_vector is not None:
             direction = self._movement_vector.normalized()
         else:
             direction = dir_from_yaw(self.body_yaw)
 
-        Dash(
-            distance=self.dash_distance,
-            duration=self.dash_duration,
-            ease=DewEase.Linear,
-        ).apply_by_direction(self, direction)
-        
+        Dash(distance=self.dash_distance, duration=self.dash_duration, ease=DewEase.Linear).apply_by_direction(self, direction)
         self._dash_cooldown = self.dash_cooldown
 
-    def _try_interact(self) -> None:
-        pos = self.agent_position
-        self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
+    HOLD_TO_REPAIR = 0.25
+
+    def _interact_press(self) -> None:
+        if not self._interact_down:
+            self._interact_down = True
+            self._hold_time = 0.0
+
+    # tap = open/close the nearest door, hold = repair the nearest damaged door/fence
+    def _interact_release(self) -> None:
+        if not self._interact_down:
+            return
+        self._interact_down = False
+        self.world.repair.release()
+        if self._hold_time < self.HOLD_TO_REPAIR:
+            pos = self.agent_position
+            self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
 
     def start_displacement(self, displacement: Displacement) -> None:
         if displacement is None or not displacement.is_alive: return
@@ -246,7 +255,6 @@ class Player:
 
     def _do_displacement(self, displacement: Displacement, dt: float, pos: Vec3) -> None:
         displacement.elapsed_time += dt
-        multiplier = max(0.0, self.movement_speed_multiplier)
 
         if isinstance(displacement, DispByDestination):
             duration = max(1e-5, displacement.duration)
@@ -270,6 +278,11 @@ class Player:
         if dt <= 0.0: return
 
         self._dash_cooldown = max(0.0, self._dash_cooldown - dt)
+        if self._interact_down:
+            self._hold_time += dt
+            if self._hold_time >= self.HOLD_TO_REPAIR:
+                pos = self.agent_position
+                self.world.repair.hold(dt, pos.x, pos.y)
         self._process_input(camera_yaw)
 
         pos = self.agent_position

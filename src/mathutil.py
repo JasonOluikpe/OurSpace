@@ -23,7 +23,7 @@ def smooth_damp(current: float, target: float, velocity: float, smooth_time: flo
     temp = (velocity + omega * change) * dt
     velocity = (velocity - omega * temp) * exp
     output = target + (change + temp) * exp
-    
+
     if (target - current > 0.0) == (output > target):
         output = target
         velocity = (output - target) / dt if dt > 0.0 else 0.0

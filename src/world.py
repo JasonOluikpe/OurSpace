@@ -9,7 +9,7 @@ from panda3d.core import (
     TextNode,
     TransparencyAttrib,
     Vec3,
-    Vec4,
+    Vec4
 )
 
 from src import layout
@@ -17,7 +17,9 @@ from src.collision import CollisionWorld, Rect
 from src.debris import DebrisField
 from src.doors import DoorManager
 from src.fence import Fence
+from src.repair import RepairSystem
 from src.meshes import make_box
+
 
 COL_FLOOR   = (0.15, 0.14, 0.13, 1.00)
 COL_WALL    = (0.10, 0.10, 0.11, 1.00)
@@ -26,12 +28,11 @@ COL_FENCE   = (0.40, 0.40, 0.40, 1.00)
 COL_GRID    = (0.32, 0.40, 0.46, 1.00)
 COL_OUTSIDE = (0.09, 0.10, 0.10, 1.00)
 
-WALL_FADE_ALPHA = 0.18      # walls between camera and player fade to this
+WALL_FADE_ALPHA = 0.18
 WALL_FADE_SPEED = 10.0
 
 
 def _segment_hits_box(p0: Vec3, p1: Vec3, b: layout.Box, pad: float = 0.05) -> bool:
-    """Slab test: does the segment p0->p1 pass through the (padded) box?"""
     lo = (b.x0 - pad, b.y0 - pad, b.z0)
     hi = (b.x1 + pad, b.y1 + pad, b.z1)
     t0, t1 = 0.0, 1.0
@@ -67,7 +68,7 @@ class World:
 
         sx, sy = layout.spawn_point()
         self.spawn = Vec3(sx, sy, 0.0)
-        self.player_bounds = layout.walkable_bounds()      # the player stays on the floor
+        self.player_bounds = layout.walkable_bounds()
 
         self._build_environment()
         self._build_floor()
@@ -81,18 +82,16 @@ class World:
             layout.agent_bounds(),
         )
 
-        # animated doors: they collide while closed / opening, and fade like walls
         self.debris.collision = self.collision
         self.doors = DoorManager(self.app, self.root, self.debris)
         for provider in self.doors.colliders():
             self.collision.add_dynamic(provider)
 
-        # the dog fence is dynamic too (it can be broken)
         self.fence = Fence(self.root, self.debris)
         self.collision.add_dynamic(self.fence.collider)
 
-        # everything a minion is able to break
         self.obstacles = list(self.doors.doors) + [self.fence]
+        self.repair = RepairSystem(self.app, self)
         for np, box in self.doors.fade_targets():
             self._fading.append(_FadingWall(np, box))
 
@@ -105,9 +104,9 @@ class World:
         return Vec3((x0 + x1) * 0.5, (y0 + y1) * 0.5, 0.0)
 
     def update(self, dt: float, camera_pos: Vec3, focus: Vec3) -> None:
-        """Fade out walls that sit between the camera and the player."""
         self.doors.update(dt, focus.x, focus.y)
         self.fence.update(dt)
+        self.repair.update(dt, focus.x, focus.y)
         self.debris.update(dt)
         k = min(1.0, dt * WALL_FADE_SPEED)
         for w in self._fading:

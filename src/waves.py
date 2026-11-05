@@ -12,22 +12,22 @@ from src.hud import WaveBanner
 class WaveSpec:
     number: int
     minions: int = 0
-    spawn_interval: float = 0.6 # seconds between spawns
+    spawn_interval: float = 0.6
     implemented: bool = True
 
 
+# only wave 1 is implemented; 2-5 are placeholders
 WAVES = (
     WaveSpec(1, minions=20, spawn_interval=0.6),
-    WaveSpec(2, implemented=False),     # TODO
-    WaveSpec(3, implemented=False),     # TODO
-    WaveSpec(4, implemented=False),     # TODO
-    WaveSpec(5, implemented=False),     # TODO
+    WaveSpec(2, implemented=False),
+    WaveSpec(3, implemented=False),
+    WaveSpec(4, implemented=False),
+    WaveSpec(5, implemented=False)
 )
 
-START_DELAY = 3.0 # time between game start and the first spawn
-COUNTDOWN = 20.0  # seconds between waves
+START_DELAY = 3.0
+COUNTDOWN = 20.0
 
-# states
 INTRO, ACTIVE, COUNTING, IDLE, FINISHED = "intro", "active", "counting", "idle", "finished"
 
 
@@ -36,7 +36,7 @@ class WaveManager:
         self.swarm = swarm
         self.banner = WaveBanner(app)
 
-        self.index = 0                  # index into WAVES
+        self.index = 0
         self.state = INTRO
         self._timer = START_DELAY
         self._to_spawn = 0
@@ -51,7 +51,7 @@ class WaveManager:
 
     def _begin_wave(self) -> None:
         if not self.spec.implemented:
-            self.state = IDLE # wave 2+ : announced, nothing happens (for now)
+            self.state = IDLE
             return
         self.state = ACTIVE
         self._to_spawn = self.spec.minions

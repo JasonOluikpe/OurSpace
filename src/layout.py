@@ -3,15 +3,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-# --------------------------------------------------------------------------- #
-#  Sketch -> world conversion.  Origin = middle of the front wall,
-#  +X = right, +Y = toward the balcony.
-# --------------------------------------------------------------------------- #
+
+# The layout is authored in pixels of the hand-drawn sketch; W() converts to meters.
+# World origin: middle of the front wall. +X = right, +Y = toward the balcony.
 PX_X = 0.105
 PX_Y = 0.070
 ORIGIN_PX = (615, 537)
 
-DOOR_M = 1.9                  # every doorway (balcony door excepted)
+DOOR_M = 1.9
 DX = DOOR_M / PX_X
 DY = DOOR_M / PX_Y
 
@@ -20,7 +19,6 @@ def W(px: float, py: float) -> tuple[float, float]:
     return ((px - ORIGIN_PX[0]) * PX_X, (ORIGIN_PX[1] - py) * PX_Y)
 
 
-# Sketch bounds
 ROOM_L, ROOM_R = 443, 787
 ROOM_T, ROOM_B = 280, 537
 BALC_T = 228
@@ -32,23 +30,19 @@ COUNTER_H = 1.6
 FENCE_H = 1.4
 FLOOR_THICK = 0.10
 
-# Wall segments (px1, py1, px2, py2). Gaps between segments are doorways.
+# Gaps between segments are doorways. The front entrance deliberately has no door.
 WALLS = [
-    # exterior shell
     (443, 537, 625, 537),
     (625 + DX, 537, 787, 537),
     (443, 280, 443, 537),
     (787, 280, 787, 537),
-    (443, 280, 480, 280),          # balcony divider, left of sliding door
-    (570, 280, 787, 280),          # balcony divider, right of sliding door
-    # bedroom
+    (443, 280, 480, 280),
+    (570, 280, 787, 280),
     (629, 280 + DY, 629, 440),
     (629, 440, 728, 440),
     (728 + DX, 440, 787, 440),
-    # bathroom
     (688, 440, 688, 479 - DY / 2),
     (688, 479 + DY / 2, 688, 537),
-    # closet
     (541, 480, 541, 537),
     (541, 480, 587, 480),
     (587, 480, 587, 497),
@@ -61,7 +55,7 @@ RAILS = [
     (443, 228, 787, 228),
 ]
 
-FENCE = (560, 629, 396)            # px x1, x2, y
+FENCE = (560, 629, 396)
 
 COUNTER = [
     (443, 375, 560, 417),
@@ -78,14 +72,11 @@ LABELS = (
     ("BALCONY",     615, 258, 1.00),
 )
 
-SPAWN_PX = (515, 335)            # player: living room
-ANNA_SPAWN_PX = (545, 345)       # Anna: next to the player, in the living room
-OUTSIDE_DEPTH = 9.0              # walkable strip outside the front door (minions only)
+SPAWN_PX = (515, 335)
+ANNA_SPAWN_PX = (545, 345)
+OUTSIDE_DEPTH = 9.0
 
 
-# --------------------------------------------------------------------------- #
-#  Derived geometry (world meters)
-# --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class Box:
     x0: float
@@ -122,7 +113,6 @@ def counter_boxes() -> list[Box]:
 
 
 def fence_boxes() -> list[Box]:
-    """Visual parts of the dog fence: rails + pickets."""
     px1, px2, py = FENCE
     xa, y = W(px1, py)
     xb, _ = W(px2, py)
@@ -162,14 +152,13 @@ def balcony_box() -> Box:
 
 
 def walkable_bounds() -> tuple[float, float, float, float]:
-    """(xmin, ymin, xmax, ymax) of the whole floor incl. balcony."""
     x0, y_top = W(ROOM_L, BALC_T)
     x1, y_bot = W(ROOM_R, ROOM_B)
     return x0, y_bot, x1, y_top
 
 
 def collider_boxes() -> list[Box]:
-    return wall_boxes() + rail_boxes() + counter_boxes()   # fence + doors are dynamic (breakable)
+    return wall_boxes() + rail_boxes() + counter_boxes()
 
 
 def spawn_point() -> tuple[float, float]:
@@ -181,13 +170,11 @@ def anna_spawn_point() -> tuple[float, float]:
 
 
 def agent_bounds() -> tuple[float, float, float, float]:
-    """Bounds for minions: the floor plus the strip outside the front door."""
     x0, y0, x1, y1 = walkable_bounds()
     return x0, y0 - OUTSIDE_DEPTH, x1, y1
 
 
 def front_door_center() -> tuple[float, float]:
-    """Middle of the (door-less) front entrance, on the outer face of the wall."""
     x, _ = W(625 + DX / 2, 537)
     return x, 0.0
 
@@ -197,32 +184,26 @@ def outside_box() -> Box:
     return Box(x0, y0, x1, 0.0, -FLOOR_THICK, 0.0)
 
 
-# --------------------------------------------------------------------------- #
-#  Doors
-# --------------------------------------------------------------------------- #
 DOOR_HEIGHT = WALL_HEIGHT
 DOOR_THICK = 0.12
-SLIDE_OFFSET = 0.17          # sliding panels sit beside the wall, not in it
+SLIDE_OFFSET = 0.17
 
 
 @dataclass(frozen=True)
 class DoorSpec:
     name: str
-    kind: str                          # "swing" | "slide"
-    a: tuple[float, float]             # opening start (world xy)
-    b: tuple[float, float]             # opening end   (world xy)
-    # swing
-    hinge_at_b: bool = False           # hinge at b (else at a)
-    open_normal: tuple[float, float] = (0.0, 1.0)   # side the leaf swings toward
-    # slide
+    kind: str
+    a: tuple[float, float]
+    b: tuple[float, float]
+    hinge_at_b: bool = False
+    open_normal: tuple[float, float] = (0.0, 1.0)
     slide_toward_b: bool = True
-    slide_offset: tuple[float, float] = (0.0, 0.0)  # panel offset from wall centre-line
+    slide_offset: tuple[float, float] = (0.0, 0.0)
     glass: bool = False
-    duration: float = 0.7              # seconds to fully open / close
+    duration: float = 0.7
 
 
 def _opening(p0, p1):
-    """Sketch-pixel gap -> world opening, trimmed by the wall-end overhang."""
     a, b = W(*p0), W(*p1)
     length = math.hypot(b[0] - a[0], b[1] - a[1])
     ux, uy = (b[0] - a[0]) / length, (b[1] - a[1]) / length
@@ -231,32 +212,20 @@ def _opening(p0, p1):
 
 
 def door_specs() -> list[DoorSpec]:
-    """The front door / entry has no door."""
     specs = []
 
-    # bathroom: hinge at the south end, swings INTO the bathroom (east)
     a, b = _opening((688, 479 - DY / 2), (688, 479 + DY / 2))
-    specs.append(DoorSpec("bathroom", "swing", a, b, hinge_at_b=True,
-                          open_normal=(1.0, 0.0)))
+    specs.append(DoorSpec("bathroom", "swing", a, b, hinge_at_b=True, open_normal=(1.0, 0.0)))
 
-    # closet: swings OUT toward the entry (east)
     a, b = _opening((587, 497), (587, 497 + DY))
-    specs.append(DoorSpec("closet", "swing", a, b, hinge_at_b=True,
-                          open_normal=(1.0, 0.0)))
+    specs.append(DoorSpec("closet", "swing", a, b, hinge_at_b=True, open_normal=(1.0, 0.0)))
 
-    # lower bedroom door: swings INTO the bedroom (north)
     a, b = _opening((728, 440), (728 + DX, 440))
-    specs.append(DoorSpec("bedroom_lower", "swing", a, b, hinge_at_b=True,
-                          open_normal=(0.0, 1.0)))
+    specs.append(DoorSpec("bedroom_lower", "swing", a, b, hinge_at_b=True, open_normal=(0.0, 1.0)))
 
-    # upper bedroom door: slides south along the wall, on the bedroom side
     a, b = _opening((629, 280), (629, 280 + DY))
-    specs.append(DoorSpec("bedroom_upper", "slide", a, b, slide_toward_b=True,
-                          slide_offset=(SLIDE_OFFSET, 0.0), duration=1.0))
+    specs.append(DoorSpec("bedroom_upper", "slide", a, b, slide_toward_b=True, slide_offset=(SLIDE_OFFSET, 0.0), duration=1.0))
 
-    # balcony: big glass slider, slides east along the divider on the balcony side
     a, b = _opening((480, 280), (570, 280))
-    specs.append(DoorSpec("balcony", "slide", a, b, slide_toward_b=True,
-                          slide_offset=(0.0, SLIDE_OFFSET), glass=True,
-                          duration=1.6))
+    specs.append(DoorSpec("balcony", "slide", a, b, slide_toward_b=True, slide_offset=(0.0, SLIDE_OFFSET), glass=True, duration=1.6))
     return specs
