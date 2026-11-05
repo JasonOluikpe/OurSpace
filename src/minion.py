@@ -11,6 +11,7 @@ from src.player import make_capsule
 
 
 PCELL_REPLAN_DISTANCE = 3
+MINION_HP = 5.0
 
 def _dist_to_rect(x: float, y: float, rect) -> float:
     cx = min(max(x, rect.x0), rect.x1)
@@ -64,6 +65,10 @@ class Minion:
         self.attacking = None
         self._swing_timer = 0.0
         self._lunge = 0.0
+
+        self.max_hp = MINION_HP
+        self.hp = MINION_HP
+        self._flash = 0.0
 
     @property
     def position(self) -> Vec3:
@@ -183,6 +188,11 @@ class Minion:
         if dt <= 0.0 or not self.alive:
             return
 
+        if self._flash > 0.0:
+            self._flash -= dt
+            if self._flash <= 0.0:
+                self.model.clearColorScale()
+
         self._since_plan += dt
         self._plan_timer -= dt
 
@@ -234,6 +244,17 @@ class Minion:
         nx, ny = self.world.collision.resolve(nx, ny, self.radius)
         self.node.setPos(nx, ny, self.world.height_at(nx, ny))
         self.node.setH(-yaw_from_dir(dx, dy))
+
+    def take_damage(self, amount: float) -> bool:
+        if not self.alive:
+            return False
+        self.hp -= amount
+        if self.hp <= 0.0:
+            self.kill()
+            return True
+        self._flash = 0.12
+        self.model.setColorScale(1.0, 0.35, 0.35, 1.0)
+        return False
 
     def kill(self) -> None:
         if not self.alive:

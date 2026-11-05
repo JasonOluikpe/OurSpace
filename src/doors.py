@@ -237,4 +237,4 @@ class DoorManager:
                 self.prompt.setText("")
             else:
                 verb = "close" if self._near.is_open else "open"
-                self.prompt.setText(f"Triangle / E: {verb} door")
+                self.prompt.setText(f"Triangle to {verb} door")
