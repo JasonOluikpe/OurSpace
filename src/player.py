@@ -88,7 +88,7 @@ class Player:
 
         self._movement_vector: Optional[Vec3] = None
 
-        self.dash_distance = 2.25
+        self.dash_distance = 2.75
         self.dash_duration = 0.25
         self.dash_cooldown = 0.6
         self._dash_cooldown = 0.0
