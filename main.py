@@ -8,6 +8,7 @@ from src.swarm import Swarm
 from src.waves import WaveManager
 from src.anna import Anna
 from src.gun import Gun
+from src.win_theme import apply_dark_mode
 
 
 loadPrcFileData(
@@ -26,6 +27,7 @@ loadPrcFileData(
 class Game(ShowBase):
     def __init__(self) -> None:
         super().__init__()
+        apply_dark_mode(self)
 
         self.world = World(self)
         self.player = Player(self, self.world)
@@ -55,3 +57,12 @@ class Game(ShowBase):
 
 if __name__ == '__main__':
     Game().run()
+
+
+# Game Idea: Girl, her boyfriend (co-op multiplayer), and her Dog, defend her apartment from Mind Controlled Minions
+# Game Idea: 5 Waves of Minions, each getting progressively harder; boss fight after wave 5
+
+# TODO: Tune Player Dash
+# TODO: Implement Player Healthbar
+# TODO: Implement Player Dying
+# TODO: Implement Multiplayer

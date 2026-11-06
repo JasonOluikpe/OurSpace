@@ -134,15 +134,12 @@ class Gun:
                 text="", parent=parent, pos=(0.08, 0.12), scale=0.07, fg=(1.0, 0.9, 0.4, 1),
                 shadow=(0, 0, 0, 0.9), align=TextNode.ALeft, mayChange=True)
 
-        # keyboard fallback: F = shoot, R = reload
-        app.accept("f", self.shoot)
-        app.accept("r", self.reload)
         pad = getattr(player, "gamepad", None)
         if pad is not None:
             pad.on_shoot = self.shoot       # Square
             pad.on_reload = self.reload     # R1
 
-    # aiming
+    # ------------------------------------------------------------ aiming
     @property
     def reload_progress(self) -> float:
         if self.reload_left <= 0.0:
@@ -191,7 +188,7 @@ class Gun:
             d = dir_from_yaw(self.player.body_yaw)
             self._aim = (d.x, d.y)
 
-    # actions
+    # ------------------------------------------------------------ actions
     def _say_at_player(self, text: str, colour=C_BANG, scale: float = 0.5, life: float = 0.7) -> None:
         pl = self.player.agent_position
         self.fx.spawn(text, pl.x, pl.y, 2.3, colour, scale, life)
@@ -203,7 +200,7 @@ class Gun:
             return
         if self.ammo <= 0:
             self.cooldown = 0.25
-            self._say_at_player("No ammo", C_WALL, 0.4, 0.8)
+            self._say_at_player("*click*  (R1 to reload)", C_WALL, 0.4, 0.8)
             return
 
         target = self._pick_target()
@@ -222,7 +219,8 @@ class Gun:
 
         self.ammo -= 1
         self.cooldown = self.fire_cooldown
-        self.fx.spawn('FAH!', pl.x + ux * 0.8, pl.y + uy * 0.8, 1.9, C_BANG, 0.55, 0.5)
+        self.fx.spawn(random.choice(("BANG!", "POW!", "PEW!")),
+                      pl.x + ux * 0.8, pl.y + uy * 0.8, 1.9, C_BANG, 0.55, 0.5)
         if self.ammo == 0:
             self._say_at_player("empty! (R1)", C_WALL, 0.4, 0.9)
 
@@ -231,27 +229,27 @@ class Gun:
             return
         self.reload_left = self.reload_time
         self._clack_done = False
-        self._say_at_player("reloading...", C_RELOAD, 0.45, 1.0)
+        self._say_at_player("click...", C_RELOAD, 0.45, 1.0)
 
     def _tick_reload(self, dt: float) -> None:
         total = max(1e-3, self.reload_time)
         self.reload_left = max(0.0, self.reload_left - dt)
         if not self._clack_done and self.reload_left <= total * 0.5:
             self._clack_done = True
-            self._say_at_player("reloading...", C_RELOAD, 0.45, 1.0)
+            self._say_at_player("clack...", C_RELOAD, 0.45, 1.0)
         if self.reload_left <= 0.0:
             self.ammo = self.mag_size
-            self._say_at_player("Reloaded!", C_RELOAD, 0.45, 0.9)
+            self._say_at_player("KA-CHAK!", C_RELOAD, 0.6, 0.9)
 
-    # bullets
+    # ------------------------------------------------------------ bullets
     def _hit_minion(self, m) -> None:
         p = m.position                      # read before kill() removes the node
         x, y = p.x, p.y
         if m.take_damage(self.damage):
             self.kills += 1
-            self.fx.spawn("DEAD!", x, y, 1.9, C_KILL, 0.45, 0.8)
+            self.fx.spawn("SPLAT!", x, y, 1.9, C_KILL, 0.6, 0.8)
         else:
-            self.fx.spawn("Hit!", x, y, 1.9, C_HIT, 0.45, 0.5)
+            self.fx.spawn("THWACK!", x, y, 1.9, C_HIT, 0.45, 0.5)
 
     def _update_bullets(self, dt: float) -> None:
         col = self.world.collision
@@ -291,7 +289,7 @@ class Gun:
             keep.append(b)
         self.bullets = keep
 
-    # visuals
+    # ------------------------------------------------------------ visuals
     def _update_model(self) -> None:
         pl = self.player.agent_position
         ux, uy = self._aim

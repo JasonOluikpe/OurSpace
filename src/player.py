@@ -109,22 +109,9 @@ class Player:
         material.setShininess(28.0)
         self.model.setMaterial(material, 1)
 
-        self.key_map = {"w": 0, "s": 0, "a": 0, "d": 0, "arrow_up": 0, "arrow_down": 0, "arrow_left": 0, "arrow_right": 0}
-        for key in self.key_map:
-            app.accept(key, self._set_key, [key, 1])
-            app.accept(f"{key}-up", self._set_key, [key, 0])
-        app.accept("space", self._try_dash)
-        app.accept("shift", self._try_dash)
-
         self._interact_down = False
         self._hold_time = 0.0
-        app.accept("e", self._interact_press)
-        app.accept("e-up", self._interact_release)
         self.gamepad = Gamepad(self.app, self._try_dash, self._interact_press, self._interact_release)
-
-    def _set_key(self, key: str, value: int) -> None:
-        if key in self.key_map:
-            self.key_map[key] = value
 
     @property
     def agent_position(self) -> Vec3:
@@ -153,13 +140,7 @@ class Player:
         return self._clamp_to_play_area(Vec3(target))
 
     def _process_input(self, camera_yaw: float) -> None:
-        gx, gy = self.gamepad.stick()
-
-        kx = float(self.key_map["d"] or self.key_map["arrow_right"]) - float(self.key_map["a"] or self.key_map["arrow_left"])
-        ky = float(self.key_map["w"] or self.key_map["arrow_up"]) - float(self.key_map["s"] or self.key_map["arrow_down"])
-
-        ix = gx if abs(gx) > 1e-5 else kx
-        iy = gy if abs(gy) > 1e-5 else ky
+        ix, iy = self.gamepad.stick()
 
         strength = math.hypot(ix, iy)
         if strength > 0.0:

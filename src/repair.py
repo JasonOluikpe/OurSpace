@@ -47,7 +47,7 @@ class RepairSystem:
         else:
             ob = self.nearest_damaged(x, y)
             if ob is not None:
-                text = f"Hold Triangle to repair ({ob.percent}%)"
+                text = f"Hold Triangle to repair {ob.display_name} ({ob.percent}%)"
         self._repairing_now = False
         if self.prompt is not None:
             self.prompt.setText(text)
