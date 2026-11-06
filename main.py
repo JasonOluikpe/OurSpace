@@ -9,6 +9,7 @@ from src.waves import WaveManager
 from src.anna import Anna
 from src.gun import Gun
 from src.win_theme import apply_dark_mode
+from src.statbars import StatBars
 
 
 loadPrcFileData(
@@ -38,6 +39,7 @@ class Game(ShowBase):
         self.anna = Anna(self, self.world, self.player, self.swarm)
 
         self.gun = Gun(self, self.world, self.player, self.swarm)
+        self.stat_bars = StatBars(self, self.player)
 
         self.accept('escape', self.userExit) # debug
         self.accept('k', self.swarm.kill_all) # debug
@@ -47,6 +49,7 @@ class Game(ShowBase):
         dt = min(ClockObject.getGlobalClock().getDt(), 1.0 / 60.0)
         self.player.update(dt, self.camera_rig.yaw)
         self.gun.update(dt)
+        self.stat_bars.update(dt)
         self.waves.update(dt)
         self.swarm.update(dt)
         self.anna.update(dt)
@@ -62,7 +65,6 @@ if __name__ == '__main__':
 # Game Idea: Girl, her boyfriend (co-op multiplayer), and her Dog, defend her apartment from Mind Controlled Minions
 # Game Idea: 5 Waves of Minions, each getting progressively harder; boss fight after wave 5
 
-# TODO: Tune Player Dash
 # TODO: Implement Player Healthbar
 # TODO: Implement Player Dying
 # TODO: Implement Multiplayer

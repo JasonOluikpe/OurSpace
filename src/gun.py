@@ -127,12 +127,12 @@ class Gun:
 
         self.hud = None
         self._hud_text = None
-        parent = getattr(app, "a2dBottomLeft", None)
+        parent = getattr(app, "a2dBottomRight", None)
         if parent is not None:
             from direct.gui.OnscreenText import OnscreenText
             self.hud = OnscreenText(
-                text="", parent=parent, pos=(0.08, 0.12), scale=0.07, fg=(1.0, 0.9, 0.4, 1),
-                shadow=(0, 0, 0, 0.9), align=TextNode.ALeft, mayChange=True)
+                text="", parent=parent, pos=(-0.08, 0.08), scale=0.07, fg=(1.0, 0.9, 0.4, 1),
+                shadow=(0, 0, 0, 0.9), align=TextNode.ARight, mayChange=True)
 
         pad = getattr(player, "gamepad", None)
         if pad is not None:
@@ -200,7 +200,7 @@ class Gun:
             return
         if self.ammo <= 0:
             self.cooldown = 0.25
-            self._say_at_player("No Ammo!", C_WALL, 0.45, 0.8)
+            self._say_at_player("No Ammo!", C_WALL, 0.4, 0.8)
             return
 
         target = self._pick_target()
@@ -221,7 +221,7 @@ class Gun:
         self.cooldown = self.fire_cooldown
         self.fx.spawn('FAH!', pl.x + ux * 0.8, pl.y + uy * 0.8, 1.9, C_BANG, 0.55, 0.5)
         if self.ammo == 0:
-            self._say_at_player("No Ammo!", C_WALL, 0.45, 0.9)
+            self._say_at_player("No Ammo!", C_WALL, 0.4, 0.9)
 
     def reload(self) -> None:
         if self.reload_left > 0.0 or self.ammo >= self.mag_size:
@@ -240,7 +240,7 @@ class Gun:
             self.ammo = self.mag_size
             self._say_at_player("Reloaded!", C_RELOAD, 0.45, 0.9)
 
-    # bullets
+    # ------------------------------------------------------------ bullets
     def _hit_minion(self, m) -> None:
         p = m.position                      # read before kill() removes the node
         x, y = p.x, p.y
@@ -288,7 +288,7 @@ class Gun:
             keep.append(b)
         self.bullets = keep
 
-    # visuals
+    # ------------------------------------------------------------ visuals
     def _update_model(self) -> None:
         pl = self.player.agent_position
         ux, uy = self._aim

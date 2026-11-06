@@ -12,9 +12,9 @@ from src.mathutil import delta_angle, dir_from_yaw, move_towards, move_towards_a
 
 def make_capsule(radius: float, height: float, segments: int = 20, cap_rings: int = 8):
     fmt = GeomVertexFormat.getV3n3()
-    vdata = GeomVertexData("player-capsule", fmt, Geom.UHStatic)
-    vwriter = GeomVertexWriter(vdata, "vertex")
-    nwriter = GeomVertexWriter(vdata, "normal")
+    vdata = GeomVertexData('player-capsule', fmt, Geom.UHStatic)
+    vwriter = GeomVertexWriter(vdata, 'vertex')
+    nwriter = GeomVertexWriter(vdata, 'normal')
     prim = GeomTriangles(Geom.UHStatic)
 
     rows = []
@@ -64,7 +64,7 @@ def make_capsule(radius: float, height: float, segments: int = 20, cap_rings: in
     prim.closePrimitive()
     geom = Geom(vdata)
     geom.addPrimitive(prim)
-    node = GeomNode("player-capsule")
+    node = GeomNode('player-capsule')
     node.addGeom(geom)
     return node
 
@@ -93,10 +93,22 @@ class Player:
         self.dash_cooldown = 0.6
         self._dash_cooldown = 0.0
 
+        self.max_health = 100.0
+        self.health = self.max_health
+
+        # a dash costs stamina; stamina refills after a short pause. Not enough stamina = no dash.
+        self.max_stamina = 100.0
+        self.stamina = self.max_stamina
+        self.dash_stamina_cost = 25.0
+        self.stamina_regen_rate = 25.0       # per second
+        self.stamina_regen_delay = 0.8       # seconds after a dash before regen starts
+        self._stamina_delay = 0.0
+        self.dash_denied_time = 0.0          # HUD pulse when a dash is refused
+
         self.displacement: Optional[Displacement] = None
         self._disp_start = Vec3(0.0, 0.0, 0.0)
 
-        self.node = app.render.attachNewNode("player")
+        self.node = app.render.attachNewNode('player')
         self.node.setPos(world.spawn.x, world.spawn.y, world.spawn.z)
 
         self.model = self.node.attachNewNode(make_capsule(radius=self.radius, height=1.8))
@@ -124,6 +136,14 @@ class Player:
     @property
     def is_displacing(self) -> bool:
         return self.displacement is not None
+
+    # death isn't implemented yet: health just stops at 0
+    def take_damage(self, amount: float) -> bool:
+        self.health = max(0.0, self.health - amount)
+        return self.health <= 0.0
+
+    def heal(self, amount: float) -> None:
+        self.health = min(self.max_health, self.health + amount)
 
     def _clamp_to_play_area(self, point: Vec3) -> Vec3:
         x, y = self.world.collision.resolve(point.x, point.y, self.radius)
@@ -187,6 +207,9 @@ class Player:
     def _try_dash(self) -> None:
         if self.is_displacing or self._dash_cooldown > 0.0:
             return
+        if self.stamina < self.dash_stamina_cost:
+            self.dash_denied_time = 0.35
+            return
 
         if self._movement_vector is not None:
             direction = self._movement_vector.normalized()
@@ -195,6 +218,8 @@ class Player:
 
         Dash(distance=self.dash_distance, duration=self.dash_duration, ease=DewEase.Linear).apply_by_direction(self, direction)
         self._dash_cooldown = self.dash_cooldown
+        self.stamina -= self.dash_stamina_cost
+        self._stamina_delay = self.stamina_regen_delay
 
     HOLD_TO_REPAIR = 0.25
 
@@ -259,6 +284,11 @@ class Player:
         if dt <= 0.0: return
 
         self._dash_cooldown = max(0.0, self._dash_cooldown - dt)
+        self.dash_denied_time = max(0.0, self.dash_denied_time - dt)
+        if self._stamina_delay > 0.0:
+            self._stamina_delay -= dt
+        elif self.stamina < self.max_stamina:
+            self.stamina = min(self.max_stamina, self.stamina + self.stamina_regen_rate * dt)
         if self._interact_down:
             self._hold_time += dt
             if self._hold_time >= self.HOLD_TO_REPAIR:
