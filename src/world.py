@@ -4,7 +4,6 @@ from panda3d.core import (
     AmbientLight,
     AntialiasAttrib,
     DirectionalLight,
-    LineSegs,
     NodePath,
     TextNode,
     TransparencyAttrib,
@@ -18,7 +17,7 @@ from src.debris import DebrisField
 from src.doors import DoorManager
 from src.fence import Fence
 from src.repair import RepairSystem
-from src.meshes import make_box
+from src.meshes import make_box, make_plank_floor
 
 
 COL_FLOOR   = (0.15, 0.14, 0.13, 1.00)
@@ -30,6 +29,9 @@ COL_OUTSIDE = (0.09, 0.10, 0.10, 1.00)
 
 WALL_FADE_ALPHA = 0.18
 WALL_FADE_SPEED = 10.0
+
+COL_FLOOR   = (0.40, 0.36, 0.31, 1.00)   # greige plank colour (appears ~ (0.60, 0.54, 0.47))
+COL_SEAM    = (0.24, 0.21, 0.18, 1.00)   # shows through the gaps between planks
 
 
 def _segment_hits_box(p0: Vec3, p1: Vec3, b: layout.Box, pad: float = 0.05) -> bool:
@@ -75,7 +77,7 @@ class World:
         self._build_walls()
         self._build_counter()
         self.debris = DebrisField(self.root)
-        self._build_labels()
+        # self._build_labels()
 
         self.collision = CollisionWorld(
             [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()],
@@ -137,32 +139,17 @@ class World:
         self.app.render.setLight(key_node)
 
     def _build_floor(self) -> None:
-        make_box("floor", layout.floor_box(), COL_FLOOR, self.root)
-        make_box("balcony-floor", layout.balcony_box(), COL_FLOOR, self.root)
+        room, balcony = layout.floor_box(), layout.balcony_box()
+        make_box("floor", room, COL_SEAM, self.root)
+        make_box("balcony-floor", balcony, COL_SEAM, self.root)
+        make_plank_floor("floor-planks", [room, balcony], COL_FLOOR, self.root)
         make_box("outside", layout.outside_box(), COL_OUTSIDE, self.root)
-
-        x0, y_bot, x1, y_top = layout.walkable_bounds()
-        ls = LineSegs("floor-grid")
-        ls.setColor(*COL_GRID)
-        ls.setThickness(1.0)
-        x = x0
-        while x <= x1 + 1e-6:
-            ls.moveTo(x, y_bot, 0.02)
-            ls.drawTo(x, y_top, 0.02)
-            x += 1.0
-        y = y_bot
-        while y <= y_top + 1e-6:
-            ls.moveTo(x0, y, 0.02)
-            ls.drawTo(x1, y, 0.02)
-            y += 1.0
-        grid = NodePath(ls.create())
-        grid.reparentTo(self.root)
-        grid.setLightOff()
 
     def _build_walls(self) -> None:
         for b in layout.wall_boxes():
             np = make_box("wall", b, COL_WALL, self.walls_root)
             self._fading.append(_FadingWall(np, b))
+
         for b in layout.rail_boxes():
             make_box("rail", b, COL_WALL, self.walls_root)
 

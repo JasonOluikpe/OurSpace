@@ -65,6 +65,7 @@ if __name__ == '__main__':
 # Game Idea: Girl, her boyfriend (co-op multiplayer), and her Dog, defend her apartment from Mind Controlled Minions
 # Game Idea: 5 Waves of Minions, each getting progressively harder; boss fight after wave 5
 
-# TODO: Implement Player Healthbar
-# TODO: Implement Player Dying
-# TODO: Implement Multiplayer
+# TODO: Implement Gate opening
+# TODO: Implement Player dying
+# TODO: Wave should not start automatically
+# TODO: Implement multiplayer

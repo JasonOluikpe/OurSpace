@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 
 from panda3d.core import (
     Geom,
@@ -50,8 +51,7 @@ def make_box(name: str, b: Box, colour, parent: NodePath) -> NodePath:
     return np
 
 
-def make_cylinder(name: str, radius: float, height: float, colour, parent: NodePath,
-                  segments: int = 28) -> NodePath:
+def make_cylinder(name: str, radius: float, height: float, colour, parent: NodePath, segments: int = 28) -> NodePath:
     vdata = GeomVertexData(name, GeomVertexFormat.getV3n3c4(), Geom.UHStatic)
     vw = GeomVertexWriter(vdata, "vertex")
     nw = GeomVertexWriter(vdata, "normal")
@@ -65,6 +65,7 @@ def make_cylinder(name: str, radius: float, height: float, colour, parent: NodeP
             vw.addData3(radius * c, radius * s, z)
             nw.addData3(c, s, 0.0)
             cw.addData4(*colour)
+            
     for j in range(segments):
         b = j * 2
         prim.addVertices(b, b + 2, b + 3)
@@ -81,6 +82,47 @@ def make_cylinder(name: str, radius: float, height: float, colour, parent: NodeP
         cw.addData4(*colour)
     for j in range(segments):
         prim.addVertices(base, base + 1 + (j + 1) % segments, base + 1 + j)
+
+    geom = Geom(vdata)
+    geom.addPrimitive(prim)
+    node = GeomNode(name)
+    node.addGeom(geom)
+    np = NodePath(node)
+    np.reparentTo(parent)
+    return np
+
+def make_plank_floor(name: str, boxes, colour, parent: NodePath, plank_w: float = 0.20, min_len: float = 0.9, max_len: float = 1.8, gap: float = 0.008, tone: float = 0.05, z: float = 0.01, seed: int = 7) -> NodePath:
+    rng = random.Random(seed)
+    vdata = GeomVertexData(name, GeomVertexFormat.getV3n3c4(), Geom.UHStatic)
+    vw = GeomVertexWriter(vdata, "vertex")
+    nw = GeomVertexWriter(vdata, "normal")
+    cw = GeomVertexWriter(vdata, "color")
+    prim = GeomTriangles(Geom.UHStatic)
+    i = 0
+
+    for b in boxes:
+        y = b.y0
+        while y < b.y1 - 1e-6:
+            y_end = min(y + plank_w, b.y1)
+            row_shade = rng.uniform(-tone * 0.5, tone * 0.5)
+            x = b.x0 - rng.uniform(0.0, max_len)          # random stagger per row
+            while x < b.x1 - 1e-6:
+                length = rng.uniform(min_len, max_len)
+                xa, xb = max(x, b.x0), min(x + length, b.x1)
+                if xb - xa > 0.05:
+                    s = 1.0 + row_shade + rng.uniform(-tone, tone)
+                    col = (colour[0] * s, colour[1] * s, colour[2] * s, 1.0)
+                    xa2, xb2 = xa + gap / 2, xb - gap / 2
+                    ya2, yb2 = y + gap / 2, y_end - gap / 2
+                    for vx, vy in ((xa2, ya2), (xb2, ya2), (xb2, yb2), (xa2, yb2)):
+                        vw.addData3(vx, vy, z)
+                        nw.addData3(0.0, 0.0, 1.0)
+                        cw.addData4(*col)
+                    prim.addVertices(i, i + 1, i + 2)
+                    prim.addVertices(i, i + 2, i + 3)
+                    i += 4
+                x += length
+            y = y_end
 
     geom = Geom(vdata)
     geom.addPrimitive(prim)
