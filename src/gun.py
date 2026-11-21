@@ -148,7 +148,7 @@ class Gun:
 
     def _line_clear(self, x: float, y: float, m) -> bool:
         p = m.position
-        ex, ey = self.world.collision.sweep(x, y, p.x, p.y, 0.05, step=0.15)
+        ex, ey = self.world.collision.sweep(x, y, p.x, p.y, 0.05, step=0.15, over_low=True)
         return math.hypot(ex - p.x, ey - p.y) < 0.1
 
     def _pick_target(self):
@@ -258,7 +258,7 @@ class Gun:
             step = min(self.bullet_speed * dt, self.bullet_range - b.travelled)
             ax, ay = b.x, b.y
             bx, by = ax + b.ux * step, ay + b.uy * step
-            ex, ey = col.sweep(ax, ay, bx, by, BULLET_RADIUS, step=0.1)
+            ex, ey = col.sweep(ax, ay, bx, by, BULLET_RADIUS, step=0.1, over_low=True)
             wall = math.hypot(ex - bx, ey - by) > 1e-6
 
             best = None

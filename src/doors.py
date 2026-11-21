@@ -48,7 +48,7 @@ class Door(Barrier):
         h = layout.DOOR_HEIGHT
         t = layout.DOOR_THICK
         swing = spec.kind == "swing"
-        colour = COL_GLASS if spec.glass else COL_DOOR
+        colour = spec.colour or (COL_GLASS if spec.glass else COL_DOOR)
         self._colour = colour
 
         self.node = parent.attachNewNode(f"door-{spec.name}")
@@ -134,6 +134,9 @@ class Door(Barrier):
         t = max(0.0, min(self.length, t))
         return math.hypot(x - (ax + self.u[0] * t), y - (ay + self.u[1] * t))
 
+    def interact_distance(self, x: float, y: float) -> float:
+        return self.distance_to(x, y)
+
     def _player_in_doorway(self, x: float, y: float, radius: float) -> bool:
         r = self.closed_rect
         cx, cy = min(max(x, r.x0), r.x1), min(max(y, r.y0), r.y1)
@@ -198,6 +201,7 @@ class Door(Barrier):
 class DoorManager:
     def __init__(self, app, parent: NodePath, debris: DebrisField) -> None:
         self.doors = [Door(spec, parent, debris) for spec in layout.door_specs()]
+        self.extras: list = []        # other open/close-able barriers (the gate)
         self._near: Optional[Door] = None
 
         self.prompt = None
@@ -214,12 +218,15 @@ class DoorManager:
     def fade_targets(self):
         return [(d.node, d.fade_box) for d in self.doors if d.fade_box is not None]
 
-    def nearest(self, x: float, y: float) -> Optional[Door]:
+    def add_toggleable(self, obj) -> None:
+        self.extras.append(obj)
+
+    def nearest(self, x: float, y: float):
         best, best_d = None, REACH
-        for d in self.doors:
+        for d in list(self.doors) + self.extras:
             if d.broken:
                 continue
-            dist = d.distance_to(x, y)
+            dist = d.interact_distance(x, y)
             if dist < best_d:
                 best, best_d = d, dist
         return best
@@ -237,4 +244,5 @@ class DoorManager:
                 self.prompt.setText("")
             else:
                 verb = "close" if self._near.is_open else "open"
-                self.prompt.setText(f"Triangle: {verb} door")
+                noun = getattr(self._near, "prompt_noun", "door")
+                self.prompt.setText(f"Triangle: {verb} {noun}")

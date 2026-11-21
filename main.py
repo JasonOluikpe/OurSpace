@@ -62,10 +62,9 @@ if __name__ == '__main__':
     Game().run()
 
 
-# Game Idea: Girl, her boyfriend (co-op multiplayer), and her Dog, defend her apartment from Mind Controlled Minions
-# Game Idea: 5 Waves of Minions, each getting progressively harder; boss fight after wave 5
-
-# TODO: Implement Gate opening
-# TODO: Implement Player dying
-# TODO: Wave should not start automatically
-# TODO: Implement multiplayer
+# TODO: Move shower head to same wall as toilet
+# TODO: Remove healthbar system
+# TODO: Remove Wave System, keep swarm
+# TODO: Implement city background, cars driving around
+# TODO: Implement Cutscene (Email on Computer)
+# TODO: Implement Boss fight

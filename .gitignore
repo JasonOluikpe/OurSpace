@@ -8,9 +8,6 @@ env
 *.py[cod]
 *$py.class
 
-# vscode
-*.code-workspace
-
 # operating system
 .DS_Store
 Thumbs.dbg

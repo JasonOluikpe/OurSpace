@@ -11,6 +11,8 @@ class Rect:
     y0: float
     x1: float
     y1: float
+    # Low furniture (bed, couch, tub...) blocks walking but not bullets / aiming line-of-sight.
+    low: bool = False
 
 
 # 2D circle-vs-rectangle collision. resolve() pushes a circle out of overlaps, which gives
@@ -91,11 +93,13 @@ class CollisionWorld:
         return False
 
     def sweep(self, sx: float, sy: float, ex: float, ey: float,
-              radius: float, step: float = 0.05) -> tuple[float, float]:
+              radius: float, step: float = 0.05, over_low: bool = False) -> tuple[float, float]:
         r = radius - 1e-3
         lo_x, hi_x = min(sx, ex) - r, max(sx, ex) + r
         lo_y, hi_y = min(sy, ey) - r, max(sy, ey) + r
-        rects = [q for q in self._all_rects() if q.x1 >= lo_x and q.x0 <= hi_x and q.y1 >= lo_y and q.y0 <= hi_y]
+        rects = [q for q in self._all_rects()
+                 if q.x1 >= lo_x and q.x0 <= hi_x and q.y1 >= lo_y and q.y0 <= hi_y
+                 and not (over_low and q.low)]
 
         dist = math.hypot(ex - sx, ey - sy)
         steps = max(1, int(math.ceil(dist / step)))

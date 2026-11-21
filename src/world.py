@@ -17,7 +17,8 @@ from src.debris import DebrisField
 from src.doors import DoorManager
 from src.fence import Fence
 from src.repair import RepairSystem
-from src.meshes import make_box, make_plank_floor
+from src import furniture, props
+from src.meshes import make_box, make_plank_floor, make_tile_floor
 
 
 COL_FLOOR   = (0.15, 0.14, 0.13, 1.00)
@@ -31,6 +32,8 @@ WALL_FADE_ALPHA = 0.18
 WALL_FADE_SPEED = 10.0
 
 COL_FLOOR   = (0.40, 0.36, 0.31, 1.00)   # greige plank colour (appears ~ (0.60, 0.54, 0.47))
+COL_TILE   = (0.52, 0.50, 0.47, 1.00)   # large porcelain bathroom tiles
+COL_GROUT  = (0.36, 0.35, 0.33, 1.00)
 COL_SEAM    = (0.24, 0.21, 0.18, 1.00)   # shows through the gaps between planks
 
 
@@ -75,12 +78,12 @@ class World:
         self._build_environment()
         self._build_floor()
         self._build_walls()
-        self._build_counter()
+        self._build_furniture()
         self.debris = DebrisField(self.root)
         # self._build_labels()
 
         self.collision = CollisionWorld(
-            [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()],
+            [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()] + furniture.collider_rects(),
             layout.agent_bounds(),
         )
 
@@ -90,7 +93,9 @@ class World:
             self.collision.add_dynamic(provider)
 
         self.fence = Fence(self.root, self.debris)
-        self.collision.add_dynamic(self.fence.collider)
+        for provider in self.fence.collider_providers():
+            self.collision.add_dynamic(provider)
+        self.doors.add_toggleable(self.fence)
 
         self.obstacles = list(self.doors.doors) + [self.fence]
         self.repair = RepairSystem(self.app, self)
@@ -142,7 +147,8 @@ class World:
         room, balcony = layout.floor_box(), layout.balcony_box()
         make_box("floor", room, COL_SEAM, self.root)
         make_box("balcony-floor", balcony, COL_SEAM, self.root)
-        make_plank_floor("floor-planks", [room, balcony], COL_FLOOR, self.root)
+        make_plank_floor("floor-planks", layout.plank_floor_boxes() + [balcony], COL_FLOOR, self.root)
+        make_tile_floor("bathroom-tiles", layout.bathroom_box(), COL_TILE, COL_GROUT, self.root)
         make_box("outside", layout.outside_box(), COL_OUTSIDE, self.root)
 
     def _build_walls(self) -> None:
@@ -153,9 +159,9 @@ class World:
         for b in layout.rail_boxes():
             make_box("rail", b, COL_WALL, self.walls_root)
 
-    def _build_counter(self) -> None:
-        for b in layout.counter_boxes():
-            make_box("counter", b, COL_COUNTER, self.root)
+    def _build_furniture(self) -> None:
+        for np, box in props.build_apartment(self.root):
+            self._fading.append(_FadingWall(np, box))
 
     def _build_labels(self) -> None:
         for text, px, py, size in layout.LABELS:
