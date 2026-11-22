@@ -6,6 +6,7 @@ from time import perf_counter
 
 from panda3d.core import Vec3
 
+from src import layout
 from src.minion import Minion
 from src.navigation import NavGrid
 
@@ -33,6 +34,12 @@ class Swarm:
         self._next_rank += 1
         self.minions.append(m)
         return m
+
+    def spawn_group(self, count: int = 10) -> None:
+        """Spawns minions just beyond the front doorway (no wave system; call when you want them)."""
+        cx, cy = layout.front_door_center()
+        for _ in range(count):
+            self.spawn(cx + random.uniform(-1.0, 1.0), cy - random.uniform(0.8, 2.2))
 
     def alive(self) -> list[Minion]:
         return [m for m in self.minions if m.alive]

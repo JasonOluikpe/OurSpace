@@ -5,11 +5,9 @@ from src.camera import FollowCamera
 from src.world import World
 from src.player import Player
 from src.swarm import Swarm
-from src.waves import WaveManager
 from src.anna import Anna
 from src.gun import Gun
 from src.win_theme import apply_dark_mode
-from src.statbars import StatBars
 
 
 loadPrcFileData(
@@ -35,22 +33,19 @@ class Game(ShowBase):
         self.camera_rig = FollowCamera(self, self.player.node, self.world)
 
         self.swarm = Swarm(self, self.world, self.player)
-        self.waves = WaveManager(self, self.world, self.player, self.swarm)
         self.anna = Anna(self, self.world, self.player, self.swarm)
 
         self.gun = Gun(self, self.world, self.player, self.swarm)
-        self.stat_bars = StatBars(self, self.player)
 
         self.accept('escape', self.userExit) # debug
         self.accept('k', self.swarm.kill_all) # debug
+        self.accept('m', self.swarm.spawn_group) # debug: spawn 10 minions at the front door
         self.taskMgr.add(self._update, 'update')
 
     def _update(self, task):
         dt = min(ClockObject.getGlobalClock().getDt(), 1.0 / 60.0)
         self.player.update(dt, self.camera_rig.yaw)
         self.gun.update(dt)
-        self.stat_bars.update(dt)
-        self.waves.update(dt)
         self.swarm.update(dt)
         self.anna.update(dt)
         self.camera_rig.update(dt)
@@ -62,9 +57,5 @@ if __name__ == '__main__':
     Game().run()
 
 
-# TODO: Move shower head to same wall as toilet
-# TODO: Remove healthbar system
-# TODO: Remove Wave System, keep swarm
-# TODO: Implement city background, cars driving around
 # TODO: Implement Cutscene (Email on Computer)
 # TODO: Implement Boss fight

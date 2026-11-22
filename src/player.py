@@ -93,18 +93,6 @@ class Player:
         self.dash_cooldown = 0.6
         self._dash_cooldown = 0.0
 
-        self.max_health = 100.0
-        self.health = self.max_health
-
-        # a dash costs stamina; stamina refills after a short pause. Not enough stamina = no dash.
-        self.max_stamina = 100.0
-        self.stamina = self.max_stamina
-        self.dash_stamina_cost = 25.0
-        self.stamina_regen_rate = 25.0       # per second
-        self.stamina_regen_delay = 0.8       # seconds after a dash before regen starts
-        self._stamina_delay = 0.0
-        self.dash_denied_time = 0.0          # HUD pulse when a dash is refused
-
         self.displacement: Optional[Displacement] = None
         self._disp_start = Vec3(0.0, 0.0, 0.0)
 
@@ -125,6 +113,33 @@ class Player:
         self._hold_time = 0.0
         self.gamepad = Gamepad(self.app, self._try_dash, self._interact_press, self._interact_release)
 
+        # Debug keyboard movement (WASD / arrows). No dash on keyboard — controller only.
+        self._keys: dict[str, bool] = {k: False for k in (
+            "w", "a", "s", "d",
+            "arrow_up", "arrow_left", "arrow_down", "arrow_right",
+        )}
+        for k in self._keys:
+            self.app.accept(k, self._set_key, [k, True])
+            self.app.accept(k + "-up", self._set_key, [k, False])
+
+        # Debug: E opens/closes the nearest door or the fence. No on-screen prompt.
+        self._e_down = False
+        self.app.accept("e", self._e_press)
+        self.app.accept("e-up", self._e_release)
+
+    def _e_press(self) -> None:
+        if self._e_down:
+            return
+        self._e_down = True
+        pos = self.agent_position
+        self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
+
+    def _e_release(self) -> None:
+        self._e_down = False
+
+    def _set_key(self, key: str, value: bool) -> None:
+        self._keys[key] = value
+
     @property
     def agent_position(self) -> Vec3:
         return self.node.getPos(self.app.render)
@@ -136,14 +151,6 @@ class Player:
     @property
     def is_displacing(self) -> bool:
         return self.displacement is not None
-
-    # death isn't implemented yet: health just stops at 0
-    def take_damage(self, amount: float) -> bool:
-        self.health = max(0.0, self.health - amount)
-        return self.health <= 0.0
-
-    def heal(self, amount: float) -> None:
-        self.health = min(self.max_health, self.health + amount)
 
     def _clamp_to_play_area(self, point: Vec3) -> Vec3:
         x, y = self.world.collision.resolve(point.x, point.y, self.radius)
@@ -161,6 +168,14 @@ class Player:
 
     def _process_input(self, camera_yaw: float) -> None:
         ix, iy = self.gamepad.stick()
+
+        # Debug keyboard override (WASD / arrows). W = up, S = down.
+        k = self._keys
+        kx = (1.0 if (k["d"] or k["arrow_right"]) else 0.0) - (1.0 if (k["a"] or k["arrow_left"]) else 0.0)
+        ky = (1.0 if (k["w"] or k["arrow_up"]) else 0.0) - (1.0 if (k["s"] or k["arrow_down"]) else 0.0)
+        if kx != 0.0 or ky != 0.0:
+            mag = math.hypot(kx, ky)
+            ix, iy = kx / mag, ky / mag
 
         strength = math.hypot(ix, iy)
         if strength > 0.0:
@@ -207,9 +222,6 @@ class Player:
     def _try_dash(self) -> None:
         if self.is_displacing or self._dash_cooldown > 0.0:
             return
-        if self.stamina < self.dash_stamina_cost:
-            self.dash_denied_time = 0.35
-            return
 
         if self._movement_vector is not None:
             direction = self._movement_vector.normalized()
@@ -218,8 +230,6 @@ class Player:
 
         Dash(distance=self.dash_distance, duration=self.dash_duration, ease=DewEase.Linear).apply_by_direction(self, direction)
         self._dash_cooldown = self.dash_cooldown
-        self.stamina -= self.dash_stamina_cost
-        self._stamina_delay = self.stamina_regen_delay
 
     HOLD_TO_REPAIR = 0.25
 
@@ -284,11 +294,6 @@ class Player:
         if dt <= 0.0: return
 
         self._dash_cooldown = max(0.0, self._dash_cooldown - dt)
-        self.dash_denied_time = max(0.0, self.dash_denied_time - dt)
-        if self._stamina_delay > 0.0:
-            self._stamina_delay -= dt
-        elif self.stamina < self.max_stamina:
-            self.stamina = min(self.max_stamina, self.stamina + self.stamina_regen_rate * dt)
         if self._interact_down:
             self._hold_time += dt
             if self._hold_time >= self.HOLD_TO_REPAIR:

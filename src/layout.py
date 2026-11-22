@@ -33,6 +33,7 @@ WALL_THICK = 0.22
 COUNTER_H = 1.6
 FENCE_H = 1.4
 FLOOR_THICK = 0.10
+EDGE = WALL_THICK * 0.5           # floors run out to the outer face of the walls (the tower facade)
 
 # Key x positions (px). The entrance row along the front wall is deliberately tight:
 #   counter | fridge | closet | front door | bathroom wall
@@ -89,7 +90,9 @@ LABELS = (
 
 SPAWN_PX = (505, 335)
 ANNA_SPAWN_PX = (540, 345)
-OUTSIDE_DEPTH = 9.0
+# No landing / corridor floor exists outside the front door: the unit is the only thing on this level.
+# This is just an invisible strip beyond the doorway where minions can enter from (no floor, no rails).
+OUTSIDE_DEPTH = 2.5
 
 
 @dataclass(frozen=True)
@@ -194,7 +197,7 @@ def fence_collider() -> Box:
 def floor_box() -> Box:
     x0, y1 = W(ROOM_L, ROOM_T)
     x1, y0 = W(ROOM_R, ROOM_B)
-    return Box(x0, y0, x1, y1, -FLOOR_THICK, 0.0)
+    return Box(x0 - EDGE, y0, x1 + EDGE, y1, -FLOOR_THICK, 0.0)
 
 
 BATH_L, BATH_R = BATH_WALL, ROOM_R      # bathroom px extents (see WALLS)
@@ -208,18 +211,14 @@ def bathroom_box() -> Box:
 
 
 def plank_floor_boxes() -> list[Box]:
-    """Room floor minus the bathroom (which is tiled): two rectangles."""
-    room, bath = floor_box(), bathroom_box()
-    return [
-        Box(room.x0, room.y0, bath.x0, room.y1, room.z0, room.z1),
-        Box(bath.x0, bath.y1, room.x1, room.y1, room.z0, room.z1),
-    ]
+    """One continuous plank field over the whole room; the bathroom tiles sit on top of it."""
+    return [floor_box()]
 
 
 def balcony_box() -> Box:
     x0, y1 = W(ROOM_L, BALC_T)
     x1, y0 = W(ROOM_R, ROOM_T)
-    return Box(x0, y0, x1, y1, -FLOOR_THICK, 0.0)
+    return Box(x0 - EDGE, y0, x1 + EDGE, y1 + EDGE, -FLOOR_THICK, 0.0)
 
 
 def walkable_bounds() -> tuple[float, float, float, float]:
@@ -248,11 +247,6 @@ def agent_bounds() -> tuple[float, float, float, float]:
 def front_door_center() -> tuple[float, float]:
     x, _ = W(FRONT_DOOR_PX + DX / 2, 537)
     return x, 0.0
-
-
-def outside_box() -> Box:
-    x0, y0, x1, _ = agent_bounds()
-    return Box(x0, y0, x1, 0.0, -FLOOR_THICK, 0.0)
 
 
 FROSTED_GLASS = (0.80, 0.90, 0.86, 0.62)   # translucent bedroom sliding door

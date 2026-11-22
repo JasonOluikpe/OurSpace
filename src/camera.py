@@ -55,7 +55,7 @@ class FollowCamera:
         self.shake_roll_scale = 10.0
 
         self.game.camLens.setFov(55.0)
-        self.game.camLens.setNearFar(0.1, 500.0)
+        self.game.camLens.setNearFar(0.1, 1500.0)
         self.snap()
 
     def do_shake(self, amplitude: float) -> None:

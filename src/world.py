@@ -14,6 +14,7 @@ from panda3d.core import (
 from src import layout
 from src.collision import CollisionWorld, Rect
 from src.debris import DebrisField
+from src.city import City, BG as CITY_BG
 from src.doors import DoorManager
 from src.fence import Fence
 from src.repair import RepairSystem
@@ -26,14 +27,13 @@ COL_WALL    = (0.10, 0.10, 0.11, 1.00)
 COL_COUNTER = (1.00, 1.00, 1.00, 1.00)
 COL_FENCE   = (0.40, 0.40, 0.40, 1.00)
 COL_GRID    = (0.32, 0.40, 0.46, 1.00)
-COL_OUTSIDE = (0.09, 0.10, 0.10, 1.00)
 
 WALL_FADE_ALPHA = 0.18
 WALL_FADE_SPEED = 10.0
 
 COL_FLOOR   = (0.40, 0.36, 0.31, 1.00)   # greige plank colour (appears ~ (0.60, 0.54, 0.47))
-COL_TILE   = (0.52, 0.50, 0.47, 1.00)   # large porcelain bathroom tiles
-COL_GROUT  = (0.36, 0.35, 0.33, 1.00)
+COL_TILE   = (0.92, 0.91, 0.88, 1.00)   # large white porcelain bathroom tiles
+COL_GROUT  = (0.66, 0.65, 0.63, 1.00)
 COL_SEAM    = (0.24, 0.21, 0.18, 1.00)   # shows through the gaps between planks
 
 
@@ -76,6 +76,7 @@ class World:
         self.player_bounds = layout.walkable_bounds()
 
         self._build_environment()
+        self.city = City(self.app.render)       # downtown Toronto around (and below) our floor
         self._build_floor()
         self._build_walls()
         self._build_furniture()
@@ -113,6 +114,7 @@ class World:
     def update(self, dt: float, camera_pos: Vec3, focus: Vec3) -> None:
         self.doors.update(dt, focus.x, focus.y)
         self.fence.update(dt)
+        self.city.update(dt, focus.x, focus.y)
         self.repair.update(dt, focus.x, focus.y)
         self.debris.update(dt)
         k = min(1.0, dt * WALL_FADE_SPEED)
@@ -130,7 +132,7 @@ class World:
                 w.np.setAlphaScale(w.alpha)
 
     def _build_environment(self) -> None:
-        self.app.setBackgroundColor(Vec4(0.06, 0.07, 0.08, 1.0))
+        self.app.setBackgroundColor(Vec4(*CITY_BG))
         self.app.render.setAntialias(AntialiasAttrib.MMultisample)
 
         ambient = AmbientLight("ambient")
@@ -147,9 +149,10 @@ class World:
         room, balcony = layout.floor_box(), layout.balcony_box()
         make_box("floor", room, COL_SEAM, self.root)
         make_box("balcony-floor", balcony, COL_SEAM, self.root)
-        make_plank_floor("floor-planks", layout.plank_floor_boxes() + [balcony], COL_FLOOR, self.root)
-        make_tile_floor("bathroom-tiles", layout.bathroom_box(), COL_TILE, COL_GROUT, self.root)
-        make_box("outside", layout.outside_box(), COL_OUTSIDE, self.root)
+        make_plank_floor("floor-planks", layout.plank_floor_boxes() + [balcony], COL_FLOOR, self.root, gap=0.004)
+        # sits clear above the plank field (z 0.01), otherwise the two coplanar meshes z-fight into a mixture
+        make_tile_floor("bathroom-tiles", layout.bathroom_box(), COL_TILE, COL_GROUT, self.root,
+                        tile=1.5, gap=0.03, tone=0.008, z=0.03)
 
     def _build_walls(self) -> None:
         for b in layout.wall_boxes():

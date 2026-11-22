@@ -398,15 +398,16 @@ def build_bathtub(parent: NodePath) -> NodePath:
     mb.box(-W / 2 + t, -D / 2 + t, 0.30, W / 2 - t, D / 2 - t, 0.34, (0.88, 0.90, 0.92, 1))
     mb.cylinder(W / 2 - 0.55, 0.0, 0.34, 0.345, 0.07, (0.25, 0.25, 0.27, 1), 12)
 
-    # wall-mounted shower head, aimed down into the tub
-    yw = D / 2
-    mb.cyl_between((0.0, yw + 0.02, 3.00), (0.0, yw - 0.02, 3.00), 0.10, CHROME, 12)
-    mb.cyl_between((0.0, yw - 0.02, 3.00), (0.0, yw - 0.50, 3.12), 0.045, CHROME, 10)
-    n = (0.0, -0.55, -0.83)
-    p = (0.0, yw - 0.58, 3.10)
-    mb.cyl_between(p, (p[0] + n[0] * 0.11, p[1] + n[1] * 0.11, p[2] + n[2] * 0.11), 0.30, CHROME, 18)
-    mb.cyl_between((p[0] + n[0] * 0.108, p[1] + n[1] * 0.108, p[2] + n[2] * 0.108),
-                   (p[0] + n[0] * 0.118, p[1] + n[1] * 0.118, p[2] + n[2] * 0.118), 0.23, (0.30, 0.30, 0.33, 1), 18)
+    # wall-mounted shower head on the SOUTH wall (same wall as the toilet), aimed down into the tub.
+    # The tub's local +X end is its south end, so the wall plate sits at x = +W/2.
+    xw = W / 2
+    mb.cyl_between((xw + 0.02, 0.0, 3.00), (xw - 0.02, 0.0, 3.00), 0.10, CHROME, 12)
+    mb.cyl_between((xw - 0.02, 0.0, 3.00), (xw - 0.50, 0.0, 3.12), 0.045, CHROME, 10)
+    n = (-0.55, 0.0, -0.83)
+    p0 = (xw - 0.58, 0.0, 3.10)
+    mb.cyl_between(p0, (p0[0] + n[0] * 0.11, p0[1], p0[2] + n[2] * 0.11), 0.30, CHROME, 18)
+    mb.cyl_between((p0[0] + n[0] * 0.108, p0[1], p0[2] + n[2] * 0.108),
+                   (p0[0] + n[0] * 0.118, p0[1], p0[2] + n[2] * 0.118), 0.23, (0.30, 0.30, 0.33, 1), 18)
     return mb.build(parent)
 
 
