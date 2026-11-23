@@ -450,6 +450,7 @@ def street_trees() -> list[tuple[float, float, float, int]]:
 
 
 # ------------------------------------------------------------------------------ ground chunks
+LAYER_Z = (0.0, 0.02, 0.03, 0.04, 0.05, 0.055, 0.06, 0.07, 0.08)     # every flat-layer height used below
 def _quad(mb, x0, y0, x1, y1, z, col):
     mb.quad((x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z), col, (0, 0, 1))
 
@@ -457,17 +458,26 @@ def _quad(mb, x0, y0, x1, y1, z, col):
 def build_ground_chunk(ci: int, cj: int, feats: list, trees: list, parent: NodePath) -> NodePath:
     cx0, cy0, cx1, cy1 = ci * CH, cj * CH, (ci + 1) * CH, (cj + 1) * CH
     root = parent.attachNewNode(f"chunk-{ci}-{cj}")
-    mb = MeshBuilder("ground", tone=0.62)
-    _quad(mb, cx0, cy0, cx1, cy1, 0.0, COL["ground"])
+    # One mesh per height layer, each with its own depth offset: flat decals (lawns, road paint, crosswalks) sit only
+    # a few cm above each other, which z-fights (flickers) with a 24-bit depth buffer when seen from far away.
+    layers: dict[int, MeshBuilder] = {}
+
+    def layer(z: float) -> MeshBuilder:
+        rank = min(range(len(LAYER_Z)), key=lambda i: abs(LAYER_Z[i] - z))
+        if rank not in layers:
+            layers[rank] = MeshBuilder(f"ground-{rank}", tone=0.62)
+        return layers[rank]
+
+    _quad(layer(0.0), cx0, cy0, cx1, cy1, 0.0, COL["ground"])
     for (x0, y0, x1, y1, z, ck) in feats:
         a, b, c, d = max(x0, cx0), max(y0, cy0), min(x1, cx1), min(y1, cy1)
         if c > a and d > b:
-            _quad(mb, a, b, c, d, z, COL[ck])
+            _quad(layer(z), a, b, c, d, z, COL[ck])
 
     def paint(x0, y0, x1, y1, z, ck):
         a, b, c, d = max(x0, cx0), max(y0, cy0), min(x1, cx1), min(y1, cy1)
         if c > a and d > b:
-            _quad(mb, a, b, c, d, z, COL[ck])
+            _quad(layer(z), a, b, c, d, z, COL[ck])
 
     # Bay St markings: lane dividers (dashed), double yellow centre, crosswalks around the intersection
     def in_cross(y):
@@ -503,9 +513,12 @@ def build_ground_chunk(ci: int, cj: int, feats: list, trees: list, parent: NodeP
         vx, vy = bx - ax, by - ay
         L = math.hypot(vx, vy)
         nx, ny = -vy / L * 1.7, vx / L * 1.7
-        mb.quad((ax + nx, ay + ny, 0.08), (bx + nx, by + ny, 0.08), (bx - nx, by - ny, 0.08), (ax - nx, ay - ny, 0.08),
+        layer(0.08).quad((ax + nx, ay + ny, 0.08), (bx + nx, by + ny, 0.08), (bx - nx, by - ny, 0.08), (ax - nx, ay - ny, 0.08),
                 COL["path"], (0, 0, 1))
-    _finish(mb, root)
+    for rank, mb in sorted(layers.items()):
+        np = _finish(mb, root)
+        if np is not None and rank:
+            np.setDepthOffset(rank)
 
     tb = MeshBuilder("trees", tone=0.78)
     for (x, y, r, sd) in trees:

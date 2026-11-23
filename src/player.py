@@ -109,6 +109,7 @@ class Player:
         material.setShininess(28.0)
         self.model.setMaterial(material, 1)
 
+        self.interact_hook = None          # set by the cut scene: returns True if it consumed the interact press
         self._interact_down = False
         self._hold_time = 0.0
         self.gamepad = Gamepad(self.app, self._try_dash, self._interact_press, self._interact_release)
@@ -127,10 +128,15 @@ class Player:
         self.app.accept("e", self._e_press)
         self.app.accept("e-up", self._e_release)
 
+    def _locked(self) -> bool:
+        return getattr(self.app, "input_locked", False)
+
     def _e_press(self) -> None:
-        if self._e_down:
+        if self._e_down or self._locked():
             return
         self._e_down = True
+        if self.interact_hook is not None and self.interact_hook():
+            return
         pos = self.agent_position
         self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
 
@@ -220,7 +226,7 @@ class Player:
         return self.local_velocity
 
     def _try_dash(self) -> None:
-        if self.is_displacing or self._dash_cooldown > 0.0:
+        if self._locked() or self.is_displacing or self._dash_cooldown > 0.0:
             return
 
         if self._movement_vector is not None:
@@ -234,17 +240,22 @@ class Player:
     HOLD_TO_REPAIR = 0.25
 
     def _interact_press(self) -> None:
+        if self._locked():
+            return
         if not self._interact_down:
             self._interact_down = True
             self._hold_time = 0.0
 
     # tap = open/close the nearest door, hold = repair the nearest damaged door/fence
     def _interact_release(self) -> None:
-        if not self._interact_down:
+        if not self._interact_down or self._locked():
+            self._interact_down = False
             return
         self._interact_down = False
         self.world.repair.release()
         if self._hold_time < self.HOLD_TO_REPAIR:
+            if self.interact_hook is not None and not self._locked() and self.interact_hook():
+                return
             pos = self.agent_position
             self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
 

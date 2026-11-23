@@ -194,6 +194,8 @@ class Gun:
         self.fx.spawn(text, pl.x, pl.y, 2.3, colour, scale, life)
 
     def shoot(self) -> None:
+        if getattr(self.app, "input_locked", False):
+            return
         if self.reload_left > 0.0:
             return
         if self.cooldown > 0.0:
@@ -224,6 +226,8 @@ class Gun:
             self._say_at_player("No Ammo!", C_WALL, 0.4, 0.9)
 
     def reload(self) -> None:
+        if getattr(self.app, "input_locked", False):
+            return
         if self.reload_left > 0.0 or self.ammo >= self.mag_size:
             return
         self.reload_left = self.reload_time
