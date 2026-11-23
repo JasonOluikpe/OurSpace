@@ -37,7 +37,7 @@ FONT_CANDIDATES = (
 # Conversation scrip. (delay_before, kind, side, payload); side "me" = right/green, "them" = left/white.
 KLESA_SCRIPT = [
     (0.0, "stamp", None, "6:33 PM"),
-    (1.4, "image", "me", "anna 2.png"),
+    (1.4, "image", "me", "assets/anna 2.png"),
     (0.5, "text", "me", "look at this dog LOL HAHA"),
     (1.2, "text", "them", "AHAHAH she looks like a pencil dog"),
     (1.7, "text", "them", "btw your boyfriend is really hot"),
