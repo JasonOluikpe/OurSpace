@@ -39,25 +39,28 @@ class Game(ShowBase):
         self.anna = Anna(self, self.world, self.player, self.swarm)
 
         self.gun = Gun(self, self.world, self.player, self.swarm)
-        self.cutscene = Cutscene(self, self.world, self.player)   # monitor alert + WeChat cut scene
+        self.cutscene = Cutscene(self, self.world, self.player) 
         self.boss = Boss(self, self.world, self.camera_rig, self.player, self.anna, self.swarm)
-        self.cutscene.on_finished.append(self.boss.start)         # boss entrance plays right after the cut scene
+        self.boss.on_begin.append(self.cutscene.dismiss_alert)
+        self.cutscene.on_finished.append(self.boss.start)      
 
         # debug
         self.accept('escape', self.userExit)
         self.accept('k', self.swarm.kill_all)
-        self.accept('b', self.boss.start, [True])
+        self.accept('b', self.boss.start, [True]) 
         self.accept('1', self.boss.debug_attack, [1])
         self.accept('2', self.boss.debug_attack, [2])
         self.accept('m', self.swarm.spawn_group)
-        
+
         self.taskMgr.add(self._update, 'update')
 
     def _update(self, task):
         raw_dt = ClockObject.getGlobalClock().getDt()
-        if self.cutscene.active:                    # game is frozen while the cut scene plays
+        
+        if self.cutscene.active:
             self.cutscene.update(min(raw_dt, 0.1))
             return task.cont
+        
         dt = min(raw_dt, 1.0 / 60.0)
         self.player.update(dt, self.camera_rig.yaw)
         self.gun.update(dt)

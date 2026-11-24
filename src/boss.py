@@ -36,7 +36,6 @@ def _material(diffuse, ambient, shininess: float = 34.0) -> Material:
 
 # ------------------------------------------------------------------------------------------------ geometry helpers
 def make_tube(radius: float, segments: int = 24) -> GeomNode:
-    """Open cylinder of length 1 along +Y (scale its Y to set the length)."""
     vdata = GeomVertexData("tube", GeomVertexFormat.getV3n3(), Geom.UHStatic)
     vw, nw = GeomVertexWriter(vdata, "vertex"), GeomVertexWriter(vdata, "normal")
     for y in (0.0, 1.0):
@@ -78,7 +77,6 @@ def _flat_quad(parent: NodePath, corners, z: float, rgba, name: str = "decal") -
 
 
 def _segment(parent: NodePath, a: Vec3, b: Vec3, radius: float, material: Material, segments: int = 14) -> NodePath:
-    """A capsule from a to b (both tips included), used for fingers."""
     length = (b - a).length()
     holder = parent.attachNewNode("seg")
     holder.setPos(a)
@@ -100,8 +98,6 @@ BOLD_FONTS = (
 
 
 class BossSpeech:
-    """Big bold red lines across the middle of the screen."""
-
     def __init__(self, app) -> None:
         self.app = app
         self.font, self.fake_bold = None, True
@@ -110,16 +106,17 @@ class BossSpeech:
                 f = app.loader.loadFont(Filename.fromOsSpecific(p).getFullpath())
                 if f is not None and f.isValid():
                     f.setPixelsPerUnit(96)
-                    self.font, self.fake_bold = f, "Bold" not in p and "bd" not in p
+                    self.font, self.fake_bold = f, p.endswith(".ttc")      # the .ttc is only a regular face
                     break
         self.layers: list[OnscreenText] = []
         offsets = [(0.0, 0.0)]
         if self.fake_bold:                                   # no bold face available: thicken by overdrawing
-            offsets = [(dx, dz) for dx in (-0.004, 0.0, 0.004) for dz in (-0.004, 0.0, 0.004)]
+            offsets = [(-0.0018, 0.0), (0.0018, 0.0), (0.0, -0.0018), (0.0, 0.0018), (0.0, 0.0)]
         for dx, dz in offsets:
-            t = OnscreenText(text="", parent=app.aspect2d, pos=(dx, 0.12 + dz), scale=0.16,
-                             fg=(0.95, 0.04, 0.04, 1), shadow=(0, 0, 0, 1), font=self.font, align=TextNode.ACenter,
-                             mayChange=True)
+            last = (dx, dz) == offsets[-1]                     # only the top copy gets the drop shadow
+            t = OnscreenText(text="", parent=app.aspect2d, pos=(dx, 0.12 + dz), scale=0.15,
+                             fg=(0.95, 0.04, 0.04, 1), shadow=(0, 0, 0, 1) if last else None, font=self.font,
+                             align=TextNode.ACenter, mayChange=True)
             t.setBin("fixed", 90)
             self.layers.append(t)
         self.time = 0.0
@@ -333,7 +330,6 @@ class Attack1:
         source = (self.target[0] - self.ux * 3.0, self.target[1] - self.uy * 3.0)
         b.world.crush([self.hand_obb, self.arm_obb], source)
         b.camera_rig.do_shake(9.0)
-        b.add_crush_mark(self.hand_obb)
 
         a, p = b.anna.position, b.player.agent_position
         if self.hand_obb.hits_circle(a.x, a.y, b.anna.radius) or self.arm_obb.hits_circle(a.x, a.y, b.anna.radius):
@@ -442,7 +438,7 @@ class Boss:
     GROW_TIME = 5.0                  # seconds for the whole entrance
     START_DELAY = 0.6                # beat between the cut scene fading back in and the ground starting to shake
     RADIUS = 20.0
-    ABOVE_BALCONY = -24.0              # final top height above our floor: just a bit taller than the balcony
+    ABOVE_BALCONY = -24.0            # final top height above our floor: just a bit taller than the balcony
     DISTANCE = 34.0                  # from the balcony's north edge to the middle of the boss
     START_SCALE = 0.02               # the pill begins as a speck on the road
 
@@ -477,7 +473,6 @@ class Boss:
         self.indicator = SlamIndicator(app)
         self.speech = BossSpeech(app)
         self.capture = CaptureBar(anna)
-        self._marks: list[NodePath] = []
 
         self.mode = "idle"           # idle -> waiting -> growing -> post -> attack | gameover
         self.t = 0.0
@@ -487,6 +482,7 @@ class Boss:
         self.attack = None
         self._cycle = 0
         self.game_over_reason: Optional[str] = None
+        self.on_begin: list = []     # callbacks run when the entrance / a debug attack starts
         self.on_game_over = None     # optional callback(reason) for the real game-over screen
 
     # ------------------------------------------------------------------ state
@@ -508,9 +504,9 @@ class Boss:
         self.game_over_reason = None
 
     def start(self, immediate: bool = False) -> None:
-        """Begin the entrance (growth + camera rumble). Restarts it if the boss is already out.
-        immediate=True skips the short pause before the shaking starts (used by the debug key)."""
         self._reset()
+        for fn in self.on_begin:
+            fn()
         self.mode, self.t, self._rumble_done = "waiting", 0.0, 0.0
         if immediate:
             self.t = self.START_DELAY
@@ -521,6 +517,8 @@ class Boss:
     def debug_attack(self, which: int) -> None:
         """Debug: put the boss in place at once and start attack `which` (1 or 2) right now."""
         self._reset()
+        for fn in self.on_begin:
+            fn()
         self.camera_rig.set_rumble(0.0)
         self.scale = 1.0
         self.root.setScale(1.0)
@@ -543,12 +541,6 @@ class Boss:
         self.speech.say(f"GAME OVER\n{reason}", 1e9)
         if self.on_game_over is not None:
             self.on_game_over(reason)
-
-    def add_crush_mark(self, obb: OBB) -> None:
-        mark = _flat_quad(self.world.root, obb.corners(), 0.07, (0.0, 0.0, 0.0, 0.40), "crush-mark")
-        self._marks.append(mark)
-        if len(self._marks) > 12:
-            self._marks.pop(0).removeNode()
 
     # ------------------------------------------------------------------ per frame
     def update(self, dt: float) -> None:

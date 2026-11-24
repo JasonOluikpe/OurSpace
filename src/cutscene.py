@@ -1,3 +1,10 @@
+"""Monitor alert + the WeChat cut scene.
+
+Flow: 10 s after the game starts a red "!" appears over the desk monitor. Standing near it and pressing
+E (or Triangle) fades to black, freezes the game, stops drawing the 3D world and plays a fake WeChat
+(PC) window: a chat with Klesa about silly Anna photos, then a mouse cursor clicks the BP chat, which
+shows three creepy messages. Afterwards it fades back into the (unfrozen) game.
+"""
 from __future__ import annotations
 
 import math
@@ -15,7 +22,7 @@ from src.layout import Box
 from src.meshes import make_box
 
 # ------------------------------------------------------------------------------------------ tuning
-ALERT_DELAY = 1.0           # seconds after game start; 1s for debug
+ALERT_DELAY = 10.0          # seconds after game start
 INTERACT_REACH = 2.6        # metres from the monitor
 
 FONT_CANDIDATES = (
@@ -168,6 +175,8 @@ def _smooth(p: float) -> float:
 
 # ============================================================================================ world prop
 class MonitorAlert:
+    """Red billboard "!" floating above the desk monitor. Never hidden by walls."""
+
     def __init__(self, app) -> None:
         tmp = app.render.attachNewNode("tmp-desk")
         tmp.setPos(F.DESK.x, F.DESK.y, 0.0)
@@ -213,6 +222,7 @@ _TEX_CACHE: dict[str, tuple] = {}
 
 
 def _find_asset(filename: str) -> Optional[str]:
+    """assets/<filename>; if that exact extension is missing, the same name as .png / .jpg / .jpeg."""
     stem = os.path.splitext(filename)[0]
     for name in (filename, stem + ".png", stem + ".jpg", stem + ".jpeg"):
         path = os.path.join(ASSETS_DIR, name)
@@ -222,6 +232,7 @@ def _find_asset(filename: str) -> Optional[str]:
 
 
 def _load_chat_texture(filename: str) -> Optional[tuple]:
+    """Loads assets/<filename> -> (texture, height / width), or None (grey placeholder) if it can't be read."""
     if filename in _TEX_CACHE:
         return _TEX_CACHE[filename]
     path = _find_asset(filename)
@@ -245,6 +256,8 @@ def _load_chat_texture(filename: str) -> Optional[tuple]:
 
 # ============================================================================================ chat pane
 class _Chat:
+    """One conversation's message column. Lays bubbles out top to bottom and fades them in."""
+
     def __init__(self, ui: "WeChatUI", parent: NodePath) -> None:
         self.ui = ui
         self.root = parent.attachNewNode("chat")
@@ -611,6 +624,8 @@ class WeChatUI:
 
 # ============================================================================================ the cut scene
 class Cutscene:
+    """Owns the alert, the interaction prompt and the whole fade / freeze / WeChat sequence."""
+
     DUR = {"fade_out": 0.9, "hold_in": 0.6, "fade_in": 0.9, "chat": 2.0, "bp": 0.05, "cursor": 1.5, "hover": 0.45, "click": 0.22,
            "bp_hold": 5.0, "end_out": 0.9, "hold_out": 0.6, "end_in": 0.9}
     ORDER = ["fade_out", "hold_in", "fade_in", "chat", "cursor", "hover", "click", "bp", "bp_hold",
@@ -653,6 +668,14 @@ class Cutscene:
         self._events: list = []
         self._ev_i = 0
         self._cursor_from = (0.0, 0.0)
+
+    def dismiss_alert(self) -> None:
+        """Remove the monitor "!" and its prompt if the cut scene was skipped (debug keys)."""
+        if self.state in ("idle", "ready"):
+            self.state = "done"
+            self.alert.destroy()
+            self.prompt.setText("")
+            self.player.interact_hook = None
 
     # ------------------------------------------------------------------ interaction
     def _near(self) -> bool:
