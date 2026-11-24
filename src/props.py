@@ -6,6 +6,8 @@ from panda3d.core import NodePath, TransparencyAttrib
 
 from src import furniture as F
 from src import layout
+from src.collision import Rect
+from src.destruction import Prop
 from src.layout import Box
 from src.meshes import MeshBuilder
 
@@ -484,33 +486,47 @@ def build_rug(parent: NodePath, size, base, trim) -> NodePath:
 # =========================================================================================
 # Assemble
 # =========================================================================================
-def build_apartment(parent: NodePath) -> list[tuple[NodePath, Box]]:
-    """Builds every prop under `parent`. Returns (node, box) pairs for tall things that should
-    fade out when they hide the player from the camera."""
+def build_apartment(parent: NodePath):
+    """Builds every prop under `parent`. Returns (fade, props): (node, box) pairs for tall things that fade out when
+    they hide the player from the camera, and the list of crushable Prop records."""
     root = parent.attachNewNode("furniture")
     fade: list[tuple[NodePath, Box]] = []
+    props: list[Prop] = []
+    footprints = dict(F.collider_named())
+
+    def add(name: str, nodes, height: float, colours, rects=None) -> None:
+        rects = [footprints[name]] if rects is None else rects
+        r0 = rects[0]
+        x0, y0 = min(r.x0 for r in rects), min(r.y0 for r in rects)
+        x1, y1 = max(r.x1 for r in rects), max(r.y1 for r in rects)
+        props.append(Prop(name, list(nodes), Rect(x0, y0, x1, y1), list(rects), height, colours))
 
     # bedroom
-    _place(build_bed(root), F.BED)
-    _place(build_crate(root), F.CRATE)
+    add("bed", [_place(build_bed(root), F.BED)], 1.2, [(0.16, 0.26, 0.55, 1), (0.85, 0.85, 0.88, 1), (0.45, 0.32, 0.2, 1)])
+    add("crate", [_place(build_crate(root), F.CRATE)], 1.6, [(0.5, 0.38, 0.25, 1), (0.35, 0.35, 0.37, 1)])
     # living room
-    _place(build_shelf(root), F.SHELF)
-    _place(build_desk(root), F.DESK)
-    _place(build_chair(root), F.CHAIR)
-    _place(build_couch(root), F.COUCH)
-    # kitchen
-    build_kitchen(root)
+    add("shelf", [_place(build_shelf(root), F.SHELF)], 3.0, [(0.55, 0.42, 0.28, 1), (0.8, 0.78, 0.72, 1)])
+    add("desk", [_place(build_desk(root), F.DESK)], 2.4, [(0.14, 0.13, 0.13, 1), (0.25, 0.25, 0.27, 1), (0.8, 0.8, 0.82, 1)])
+    add("chair", [_place(build_chair(root), F.CHAIR)], 2.0, [(0.08, 0.08, 0.09, 1), (0.3, 0.3, 0.32, 1)])
+    add("couch", [_place(build_couch(root), F.COUCH)], 1.6, [(0.33, 0.33, 0.40, 1), (0.22, 0.22, 0.27, 1)])
+    # kitchen (the counters are one prop: crush any part and the whole run goes)
+    counters = [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.counter_boxes()]
+    add("kitchen", [build_kitchen(root)], 1.9, [(0.93, 0.92, 0.88, 1), (0.22, 0.17, 0.14, 1), (0.6, 0.6, 0.62, 1)], counters)
     fr = _place(build_fridge(root), F.FRIDGE)
     w, d, h = F.FRIDGE_SIZE
     fade.append((fr, Box(F.FRIDGE.x - w / 2, F.FRIDGE.y - d / 2, F.FRIDGE.x + w / 2, F.FRIDGE.y + d / 2, 0.0, h)))
+    add("fridge", [fr], h, [(0.82, 0.82, 0.85, 1), (0.6, 0.6, 0.65, 1)])
     # bathroom
-    _place(build_bathtub(root), F.TUB)
-    _place(build_shower_curtain(root), F.TUB)
-    _place(build_toilet(root), F.TOILET)
-    _place(build_vanity(root), F.VANITY)
+    add("tub", [_place(build_bathtub(root), F.TUB), _place(build_shower_curtain(root), F.TUB)], 1.4,
+        [(0.92, 0.92, 0.9, 1), (0.7, 0.75, 0.8, 1)])
+    add("toilet", [_place(build_toilet(root), F.TOILET)], 1.4, [(0.93, 0.93, 0.9, 1)])
+    add("vanity", [_place(build_vanity(root), F.VANITY)], 1.8, [(0.85, 0.84, 0.8, 1), (0.25, 0.2, 0.17, 1)])
     _place(build_rug(root, F.BATH_RUG_SIZE, (0.06, 0.06, 0.07, 1), (0.10, 0.10, 0.11, 1)), F.BATH_RUG)   # black rug
     _place(build_rug(root, F.ENTRY_MAT_SIZE, (0.20, 0.12, 0.08, 1), (0.27, 0.17, 0.11, 1)), F.ENTRY_MAT)   # dark brown mat
-    # curtains (4 per room)
+    # curtains (4 per room): crushable but they don't block walking
     for c in F.curtains():
-        fade.append((build_curtain(root, c), F.curtain_fade_box(c)))
-    return fade
+        node = build_curtain(root, c)
+        fade.append((node, F.curtain_fade_box(c)))
+        props.append(Prop(f"curtain-{c.room}", [node], Rect(c.x0, c.y - 0.4, c.x1, c.y + 0.4), [], 3.9,
+                          [(0.30, 0.27, 0.22, 1), (0.22, 0.2, 0.17, 1)]))
+    return fade, props

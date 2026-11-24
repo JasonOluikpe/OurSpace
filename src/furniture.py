@@ -142,19 +142,23 @@ def _footprint(p: Placement, local, low: bool) -> Rect:
     return Rect(min(xs), min(ys), max(xs), max(ys), low=low)
 
 
-def collider_rects() -> list[Rect]:
+def collider_named() -> list[tuple[str, Rect]]:
     fw, fd, _ = FRIDGE_SIZE
     tw, td, _ = TUB_SIZE
     vw, vd = VANITY_SIZE
     return [
-        _footprint(BED, BED_LOCAL, True),
-        _footprint(CRATE, CRATE_LOCAL, False),
-        _footprint(SHELF, SHELF_LOCAL, True),
-        _footprint(DESK, DESK_LOCAL, True),
-        _footprint(CHAIR, CHAIR_LOCAL, True),
-        _footprint(COUCH, COUCH_LOCAL, True),
-        _footprint(FRIDGE, (-fw / 2, -fd / 2, fw / 2, fd / 2), False),
-        _footprint(TUB, (-tw / 2, -td / 2, tw / 2, td / 2), True),
-        _footprint(TOILET, TOILET_LOCAL, True),
-        _footprint(VANITY, (-vw / 2, -vd / 2, vw / 2, vd / 2), False),
+        ("bed", _footprint(BED, BED_LOCAL, True)),
+        ("crate", _footprint(CRATE, CRATE_LOCAL, False)),
+        ("shelf", _footprint(SHELF, SHELF_LOCAL, True)),
+        ("desk", _footprint(DESK, DESK_LOCAL, True)),
+        ("chair", _footprint(CHAIR, CHAIR_LOCAL, True)),
+        ("couch", _footprint(COUCH, COUCH_LOCAL, True)),
+        ("fridge", _footprint(FRIDGE, (-fw / 2, -fd / 2, fw / 2, fd / 2), False)),
+        ("tub", _footprint(TUB, (-tw / 2, -td / 2, tw / 2, td / 2), True)),
+        ("toilet", _footprint(TOILET, TOILET_LOCAL, True)),
+        ("vanity", _footprint(VANITY, (-vw / 2, -vd / 2, vw / 2, vd / 2), False)),
     ]
+
+
+def collider_rects() -> list[Rect]:
+    return [r for _, r in collider_named()]

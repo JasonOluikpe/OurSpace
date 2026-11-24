@@ -26,7 +26,7 @@ def _smooth(p: float) -> float:
 
 
 # Baby-style gate: a fixed panel plus a swinging leaf hinged on the bedroom wall, latch on top
-# of the leaf's free end. Still a Barrier, so minions can smash it and the player can repair it.
+# of the leaf's free end. Still a Barrier, so minions can smash it.
 class Fence(Barrier):
     name = "gate"
     prompt_noun = "gate"
@@ -98,9 +98,6 @@ class Fence(Barrier):
     def _on_break(self) -> None:
         self._reset_pose()
 
-    def _on_rebuilt(self) -> None:
-        self._reset_pose()
-
     # ------------------------------------------------------------ colliders / nav
     def collider_fixed(self) -> Optional[Rect]:
         return None if self.broken else self.fixed_rect
@@ -136,7 +133,7 @@ class Fence(Barrier):
         return self._dist(x, y, self.leaf_closed)
 
     def toggle(self, px: float, py: float, radius: float) -> bool:
-        if self.broken or self.health < 1.0:
+        if self.broken:
             return False
         if self.is_open and self._dist(px, py, self.leaf_closed) < radius + 0.1:
             return False                            # don't slam it on the player

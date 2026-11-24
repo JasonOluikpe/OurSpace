@@ -121,9 +121,6 @@ class Door(Barrier):
     def _on_break(self) -> None:
         self._reset_pose()
 
-    def _on_rebuilt(self) -> None:
-        self._reset_pose()
-
     @property
     def center(self) -> tuple[float, float]:
         return ((self.spec.a[0] + self.spec.b[0]) / 2, (self.spec.a[1] + self.spec.b[1]) / 2)
@@ -143,7 +140,7 @@ class Door(Barrier):
         return (x - cx) ** 2 + (y - cy) ** 2 < radius * radius
 
     def toggle(self, px: float, py: float, radius: float) -> bool:
-        if self.broken or self.health < 1.0:
+        if self.broken:
             return False
         if self.is_open and self._player_in_doorway(px, py, radius):
             return False

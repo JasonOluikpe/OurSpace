@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import random
+
 from panda3d.core import (
     AmbientLight,
     AntialiasAttrib,
@@ -13,11 +16,11 @@ from panda3d.core import (
 
 from src import layout
 from src.collision import CollisionWorld, Rect
-from src.debris import DebrisField
+from src.debris import DebrisField, Piece
+from src.destruction import hits_any
 from src.city import City, BG as CITY_BG
 from src.doors import DoorManager
 from src.fence import Fence
-from src.repair import RepairSystem
 from src import furniture, props
 from src.meshes import make_box, make_plank_floor, make_tile_floor
 
@@ -64,9 +67,23 @@ class _FadingWall:
         self.alpha = 1.0
 
 
+class _Solid:
+    """One wall / rail slab. Crushing replaces it with the slabs that are left over."""
+    __slots__ = ("box", "np", "fade", "kind")
+
+    def __init__(self, box, np, fade, kind) -> None:
+        self.box, self.np, self.fade, self.kind = box, np, fade, kind
+
+
+CRUSH_CELL = 0.5                  # walls are chopped into slices this long when something smashes through them
+
+
 class World:
     def __init__(self, app) -> None:
         self.app = app
+        self.solids: list[_Solid] = []
+        self.props: list = []
+        self.on_geometry_changed: list = []        # callbacks(bbox) after walls / furniture were destroyed
         self.root = app.render.attachNewNode("world")
         self.walls_root = self.root.attachNewNode("walls")
         self._fading: list[_FadingWall] = []
@@ -83,10 +100,7 @@ class World:
         self.debris = DebrisField(self.root)
         # self._build_labels()
 
-        self.collision = CollisionWorld(
-            [Rect(b.x0, b.y0, b.x1, b.y1) for b in layout.collider_boxes()] + furniture.collider_rects(),
-            layout.agent_bounds(),
-        )
+        self.collision = CollisionWorld(self._static_rects(), layout.agent_bounds())
 
         self.debris.collision = self.collision
         self.doors = DoorManager(self.app, self.root, self.debris)
@@ -99,7 +113,6 @@ class World:
         self.doors.add_toggleable(self.fence)
 
         self.obstacles = list(self.doors.doors) + [self.fence]
-        self.repair = RepairSystem(self.app, self)
         for np, box in self.doors.fade_targets():
             self._fading.append(_FadingWall(np, box))
 
@@ -115,7 +128,6 @@ class World:
         self.doors.update(dt, focus.x, focus.y)
         self.fence.update(dt)
         self.city.update(dt, focus.x, focus.y)
-        self.repair.update(dt, focus.x, focus.y)
         self.debris.update(dt)
         k = min(1.0, dt * WALL_FADE_SPEED)
         for w in self._fading:
@@ -157,14 +169,131 @@ class World:
     def _build_walls(self) -> None:
         for b in layout.wall_boxes():
             np = make_box("wall", b, COL_WALL, self.walls_root)
-            self._fading.append(_FadingWall(np, b))
+            fade = _FadingWall(np, b)
+            self._fading.append(fade)
+            self.solids.append(_Solid(b, np, fade, "wall"))
 
         for b in layout.rail_boxes():
-            make_box("rail", b, COL_WALL, self.walls_root)
+            np = make_box("rail", b, COL_WALL, self.walls_root)
+            self.solids.append(_Solid(b, np, None, "rail"))
 
     def _build_furniture(self) -> None:
-        for np, box in props.build_apartment(self.root):
+        fade, self.props = props.build_apartment(self.root)
+        for np, box in fade:
             self._fading.append(_FadingWall(np, box))
+
+    # ------------------------------------------------------------------ destruction
+    def _static_rects(self) -> list[Rect]:
+        rects = [Rect(s.box.x0, s.box.y0, s.box.x1, s.box.y1) for s in self.solids]
+        for p in self.props:
+            if p.alive:
+                rects += p.rects
+        return rects
+
+    def crush(self, obbs, source: tuple[float, float]) -> None:
+        """Smash everything under the given oriented regions: wall slices, rails, furniture, curtains, doors, gate.
+        The remains stay on the floor as debris (it never blocks walking)."""
+        pad = 0.2
+        bbox = None
+        for o in obbs:
+            b = o.bbox()
+            bbox = b if bbox is None else (min(bbox[0], b[0]), min(bbox[1], b[1]), max(bbox[2], b[2]), max(bbox[3], b[3]))
+
+        # walls and rails
+        kept: list[_Solid] = []
+        for s in self.solids:
+            b = s.box
+            if not hits_any(obbs, b.x0, b.y0, b.x1, b.y1):
+                kept.append(s)
+                continue
+            kept += self._split_solid(s, obbs, source)
+        self.solids = kept
+
+        # furniture and curtains
+        for p in self.props:
+            if p.alive and hits_any(obbs, p.area.x0, p.area.y0, p.area.x1, p.area.y1):
+                self._destroy_prop(p, source)
+
+        # doors and the gate
+        for ob in self.obstacles:
+            rect = ob.nav_state()[0]
+            if rect is not None and not ob.broken and hits_any(obbs, rect.x0, rect.y0, rect.x1, rect.y1):
+                ob.break_(source)
+
+        self.collision.rects = self._static_rects()
+        if bbox is not None:
+            for fn in self.on_geometry_changed:
+                fn((bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad))
+
+    def _split_solid(self, s: _Solid, obbs, source) -> list[_Solid]:
+        b = s.box
+        along_x = (b.x1 - b.x0) >= (b.y1 - b.y0)
+        lo, hi = (b.x0, b.x1) if along_x else (b.y0, b.y1)
+        n = max(1, int(math.ceil((hi - lo) / CRUSH_CELL)))
+        step = (hi - lo) / n
+
+        def cell_box(a: float, c: float):
+            return (a, b.y0, c, b.y1) if along_x else (b.x0, a, b.x1, c)
+
+        hit = [hits_any(obbs, *cell_box(lo + i * step, lo + (i + 1) * step)) for i in range(n)]
+        if not any(hit):
+            return [s]
+
+        s.np.removeNode()
+        if s.fade is not None and s.fade in self._fading:
+            self._fading.remove(s.fade)
+
+        thick = (b.y1 - b.y0) if along_x else (b.x1 - b.x0)
+        slices = max(1, int(math.ceil((b.z1 - b.z0) / 1.35)))
+        sh = (b.z1 - b.z0) / slices
+        pieces = []
+        for i in range(n):
+            if not hit[i]:
+                continue
+            mid = lo + (i + 0.5) * step
+            cx, cy = (mid, (b.y0 + b.y1) / 2) if along_x else ((b.x0 + b.x1) / 2, mid)
+            for k in range(slices):
+                pieces.append(Piece((cx, cy, b.z0 + (k + 0.5) * sh), 0.0 if along_x else 90.0,
+                                    (step, sh, thick), COL_WALL))
+        self.debris.shatter(pieces, source, 1.3)
+
+        out: list[_Solid] = []
+        i = 0
+        while i < n:
+            if hit[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < n and not hit[j + 1]:
+                j += 1
+            x0, y0, x1, y1 = cell_box(lo + i * step, lo + (j + 1) * step)
+            nb = layout.Box(x0, y0, x1, y1, b.z0, b.z1)
+            np = make_box("wall" if s.kind == "wall" else "rail", nb, COL_WALL, self.walls_root)
+            fade = None
+            if s.kind == "wall":
+                fade = _FadingWall(np, nb)
+                self._fading.append(fade)
+            out.append(_Solid(nb, np, fade, s.kind))
+            i = j + 1
+        return out
+
+    def _destroy_prop(self, p, source) -> None:
+        p.alive = False
+        for n in p.nodes:
+            self._fading = [w for w in self._fading if w.np != n]
+            n.removeNode()
+        area = p.area
+        w, d = area.x1 - area.x0, area.y1 - area.y0
+        count = max(5, min(18, int(w * d * 2.2)))
+        pieces = []
+        for _ in range(count):
+            x = random.uniform(area.x0, area.x1)
+            y = random.uniform(area.y0, area.y1)
+            z = random.uniform(0.2, max(0.4, p.height * 0.8))
+            pw, pd = random.uniform(0.3, 0.9), random.uniform(0.25, 0.8)
+            pieces.append(Piece((x, y, z), random.uniform(0, 180), (pw, pd, random.uniform(0.12, 0.35)),
+                                random.choice(p.colours)))
+        self.debris.shatter(pieces, source, 1.2)
 
     def _build_labels(self) -> None:
         for text, px, py, size in layout.LABELS:

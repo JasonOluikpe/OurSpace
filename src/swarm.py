@@ -27,9 +27,28 @@ class Swarm:
         self.nav = NavGrid(world.collision, MINION_RADIUS + 0.05, world.obstacles)
         self.minions: list[Minion] = []
         self._next_rank = 0
+        self.anna = None                      # set by Anna
+        self.target_mode = "player"           # "player" (default) or "anna" (boss attack 2: minions go for the dog)
+        world.on_geometry_changed.append(self.nav.refresh_region)
+
+    STOP_DISTANCE = {"player": 1.3, "anna": 0.8}      # how close they get; 0.8 = touching Anna
+
+    def target_xy(self) -> tuple[float, float]:
+        if self.target_mode == "anna" and self.anna is not None:
+            p = self.anna.position
+        else:
+            p = self.player.agent_position
+        return p.x, p.y
+
+    def set_target(self, mode: str) -> None:
+        self.target_mode = mode
+        for m in self.minions:
+            m.stop_distance = self.STOP_DISTANCE[mode]
+            m.plan_sig = None                          # re-plan towards the new target
 
     def spawn(self, x: float, y: float) -> Minion:
         m = Minion(self.app, self.world, self.player, self, self._next_rank, Vec3(x, y, 0.0))
+        m.stop_distance = self.STOP_DISTANCE[self.target_mode]
         m.flanker = (m.rank % FLANK_EVERY) == FLANK_EVERY - 1
         self._next_rank += 1
         self.minions.append(m)
@@ -73,9 +92,9 @@ class Swarm:
 
     def _plan(self, m: Minion, pcell, sig) -> None:
         pos = m.position
-        target = self.player.agent_position
+        tx, ty = self.target_xy()
         blocks, portals = self._congestion_for(m)
-        path = self.nav.find_path((pos.x, pos.y), (target.x, target.y), m.stop_distance,
+        path = self.nav.find_path((pos.x, pos.y), (tx, ty), m.stop_distance,
                                   extra_cost=blocks, extra_weight=SPREAD_WEIGHT, extra_cap=8,
                                   portal_usage=portals, portal_weight=FLANK_PORTAL_WEIGHT)
         m.apply_path(path, pcell, sig)
@@ -96,8 +115,7 @@ class Swarm:
             return
         self._update_confidence(alive)
 
-        pl = self.player.agent_position
-        pcell = self.nav.cell_of(pl.x, pl.y)
+        pcell = self.nav.cell_of(*self.target_xy())
         sig = self.nav.state_signature()
 
         pending = [m for m in alive if m.needs_repath(pcell, sig)]

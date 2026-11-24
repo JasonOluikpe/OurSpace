@@ -111,7 +111,6 @@ class Player:
 
         self.interact_hook = None          # set by the cut scene: returns True if it consumed the interact press
         self._interact_down = False
-        self._hold_time = 0.0
         self.gamepad = Gamepad(self.app, self._try_dash, self._interact_press, self._interact_release)
 
         # Debug keyboard movement (WASD / arrows). No dash on keyboard — controller only.
@@ -237,27 +236,22 @@ class Player:
         Dash(distance=self.dash_distance, duration=self.dash_duration, ease=DewEase.Linear).apply_by_direction(self, direction)
         self._dash_cooldown = self.dash_cooldown
 
-    HOLD_TO_REPAIR = 0.25
-
     def _interact_press(self) -> None:
         if self._locked():
             return
         if not self._interact_down:
             self._interact_down = True
-            self._hold_time = 0.0
-
-    # tap = open/close the nearest door, hold = repair the nearest damaged door/fence
+    
+    # releasing the interact button opens/closes the nearest door
     def _interact_release(self) -> None:
         if not self._interact_down or self._locked():
             self._interact_down = False
             return
         self._interact_down = False
-        self.world.repair.release()
-        if self._hold_time < self.HOLD_TO_REPAIR:
-            if self.interact_hook is not None and not self._locked() and self.interact_hook():
-                return
-            pos = self.agent_position
-            self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
+        if self.interact_hook is not None and self.interact_hook():
+            return
+        pos = self.agent_position
+        self.world.doors.toggle_nearest(pos.x, pos.y, self.radius)
 
     def start_displacement(self, displacement: Displacement) -> None:
         if displacement is None or not displacement.is_alive: return
@@ -305,11 +299,6 @@ class Player:
         if dt <= 0.0: return
 
         self._dash_cooldown = max(0.0, self._dash_cooldown - dt)
-        if self._interact_down:
-            self._hold_time += dt
-            if self._hold_time >= self.HOLD_TO_REPAIR:
-                pos = self.agent_position
-                self.world.repair.hold(dt, pos.x, pos.y)
         self._process_input(camera_yaw)
 
         pos = self.agent_position

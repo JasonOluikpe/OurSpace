@@ -41,6 +41,7 @@ class Anna:
         self.world = world
         self.player = player
         self.swarm = swarm
+        swarm.anna = self
 
         sx, sy = _spawn_xy()
         self.node = app.render.attachNewNode("anna")

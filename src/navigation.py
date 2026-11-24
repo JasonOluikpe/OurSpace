@@ -39,6 +39,7 @@ class NavGrid:
         self._coarse_w = (self.nx + 3) >> 2
         self._cache_sig = None
         self._cache = None
+        self.version = 0                 # bumped whenever the static geometry changes (walls/furniture destroyed)
         self._static = bytearray(self.nx * self.ny)
         for j in range(self.ny):
             for i in range(self.nx):
@@ -111,8 +112,20 @@ class NavGrid:
                             grid[idx] = 1
         return grid, owner
 
+    def refresh_region(self, bbox) -> None:
+        """Static geometry changed inside bbox = (x0, y0, x1, y1): re-bake those cells and invalidate every cached route."""
+        x0, y0, x1, y1 = bbox
+        i0, j0 = self.cell_of(x0 - self.radius, y0 - self.radius)
+        i1, j1 = self.cell_of(x1 + self.radius, y1 + self.radius)
+        for j in range(j0, j1 + 1):
+            for i in range(i0, i1 + 1):
+                x, y = self.center(i, j)
+                self._static[j * self.nx + i] = 1 if self.collision.blocked(x, y, self.radius, dynamic=False) else 0
+        self.version += 1
+        self._cache_sig = None
+
     def state_signature(self) -> tuple:
-        return tuple(obs.nav_state() for obs in self.obstacles)
+        return tuple(obs.nav_state() for obs in self.obstacles) + (self.version,)
 
     def find_path(self, start: tuple[float, float], target: tuple[float, float],
                   reach: float = 1.3, extra_cost: Optional[dict] = None,

@@ -229,10 +229,10 @@ class Minion:
 
         target = self._next_target(pos, k_obs)
         if target is None:
-            p = self.player.agent_position
-            if math.hypot(p.x - pos.x, p.y - pos.y) <= self.stop_distance:
+            tx, ty = self.swarm.target_xy()
+            if math.hypot(tx - pos.x, ty - pos.y) <= self.stop_distance:
                 return
-            target = (p.x, p.y)
+            target = (tx, ty)
 
         dx, dy = target[0] - pos.x, target[1] - pos.y
         dist = math.hypot(dx, dy)

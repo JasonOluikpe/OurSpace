@@ -44,6 +44,8 @@ class FollowCamera:
         self._pivot_vel = Vec3(0.0, 0.0, 0.0)
         self._shakes: list[_ShakeState] = []
         self._shake_counter = 0.0
+        self._rumble = 0.0                 # sustained shake strength (set every frame by whoever causes it)
+        self._rumble_t = 0.0
 
         self.shake_amplitude = 3.0
         self.shake_frequency = 1.0
@@ -69,6 +71,9 @@ class FollowCamera:
             seed=self._shake_counter * 2.399,
         ))
 
+    def set_rumble(self, amplitude: float) -> None:
+        self._rumble = max(0.0, amplitude)
+
     def _update_shakes(self, dt: float) -> None:
         if not self._shakes: return
         for shake in self._shakes:
@@ -76,7 +81,7 @@ class FollowCamera:
         self._shakes = [s for s in self._shakes if s.age < s.total_time]
 
     def _shake_offset(self) -> tuple[Vec3, float]:
-        if not self._shakes:
+        if not self._shakes and self._rumble <= 0.0:
             return Vec3(0.0, 0.0, 0.0), 0.0
 
         offset = Vec3(0.0, 0.0, 0.0)
@@ -84,6 +89,12 @@ class FollowCamera:
         angle = math.radians(self.yaw)
         right = Vec3(math.cos(angle), -math.sin(angle), 0.0)
         up = Vec3(0.0, 0.0, 1.0)
+
+        if self._rumble > 0.0:                      # a few incommensurate frequencies = irregular, rumbling shake
+            a, t = self._rumble * self.shake_world_scale, self._rumble_t
+            offset += right * ((math.sin(t * 47.0) + 0.6 * math.sin(t * 83.0 + 1.3)) * a * 0.62)
+            offset += up * ((math.sin(t * 39.0 + 2.1) + 0.5 * math.sin(t * 71.0 + 0.4)) * a * 0.5)
+            roll += (math.sin(t * 29.0 + 0.7) + 0.5 * math.sin(t * 53.0)) * a * 0.6
 
         for shake in self._shakes:
             local = shake.age
@@ -128,4 +139,5 @@ class FollowCamera:
                 self._pivot, self._target_point(), self._pivot_vel,
                 self.follow_smooth_time, dt)
             self._update_shakes(dt)
+            self._rumble_t += dt
         self._apply()

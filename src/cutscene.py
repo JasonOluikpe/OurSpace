@@ -1,20 +1,12 @@
-"""Monitor alert + the WeChat cut scene.
-
-Flow: 10 s after the game starts a red "!" appears over the desk monitor. Standing near it and pressing
-E (or Triangle) fades to black, freezes the game, stops drawing the 3D world and plays a fake WeChat
-(PC) window: a chat with Klesa about silly Anna photos, then a mouse cursor clicks the BP chat, which
-shows three creepy messages. Afterwards it fades back into the (unfrozen) game.
-"""
 from __future__ import annotations
 
-import base64
 import math
 import os
 from typing import Callable, Optional
 
 from direct.gui.OnscreenText import OnscreenText
 from panda3d.core import (
-    CardMaker, CullBinManager, Filename, PNMImage, StringStream, Geom, GeomNode, GeomTriangles, GeomVertexData, GeomVertexFormat,
+    CardMaker, CullBinManager, Filename, PNMImage, Geom, GeomNode, GeomTriangles, GeomVertexData, GeomVertexFormat,
     GeomVertexWriter, NodePath, Point3, TextNode, Texture, TransparencyAttrib, Vec3, Vec4,
 )
 
@@ -23,10 +15,9 @@ from src.layout import Box
 from src.meshes import make_box
 
 # ------------------------------------------------------------------------------------------ tuning
-ALERT_DELAY = 1             # seconds after game start; 1 second for debug
+ALERT_DELAY = 1.0           # seconds after game start; 1s for debug
 INTERACT_REACH = 2.6        # metres from the monitor
 
-ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "chat")
 FONT_CANDIDATES = (
     "C:/Windows/Fonts/segoeui.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -34,29 +25,27 @@ FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 )
 
-# Conversation scrip. (delay_before, kind, side, payload); side "me" = right/green, "them" = left/white.
+# Conversation scripts. (delay_before, kind, side, payload); side "me" = right/green, "them" = left/white.
 KLESA_SCRIPT = [
     (0.0, "stamp", None, "6:33 PM"),
-    (1.4, "image", "me", "assets/anna 2.png"),
+    (1.4, "image", "me", "anna.png"),
     (0.5, "text", "me", "look at this dog LOL HAHA"),
     (1.2, "text", "them", "AHAHAH she looks like a pencil dog"),
     (1.7, "text", "them", "btw your boyfriend is really hot"),
     (1.5, "text", "me", "LMAOO i know right??"),
-    (1.6, "text", "me", "wait what")
+    (1.6, "text", "me", "wait what"),
 ]
-
-BP_HISTORY = [ 
+BP_HISTORY = [
     (0.0, "stamp", None, "6:47 PM"),
-    (0.0, "text", "them", "Hey I found your address."),
+    (0.0, "text", "them", "Hey, I found your address."),
     (0.0, "text", "them", "I'm coming over to give you presents."),
-    (0.0, "text", "them", "See you soon!")
+    (0.0, "text", "them", "See you soon!"),
 ]
-
-BP_LIVE = [
-    (1.0, "typesend", "me", "NO!!"),
-    (1.4, "text", "them", "What is your problem? Anyways i'm already here."),
-    (1.9, "text", "them", "Security isn't letting me up though."),
-    (1.9, "text", "them", "No problem at all, I'll just come up myself.")
+BP_LIVE = [             # arrives text by text after the chat is opened
+    (1.0, "typesend", "me", "NO!!"),                 # typed into the box, then the Send button is clicked
+    (1.4, "text", "them", "what is your problem? Anyways i'm already here!"),
+    (1.9, "text", "them", "Security isn't letting me up."),
+    (1.9, "text", "them", "No problem at all, I'll come up myself."),
 ]
 
 # ------------------------------------------------------------------------------------------ 2D layout (canvas px)
@@ -179,8 +168,6 @@ def _smooth(p: float) -> float:
 
 # ============================================================================================ world prop
 class MonitorAlert:
-    """Red billboard "!" floating above the desk monitor. Never hidden by walls."""
-
     def __init__(self, app) -> None:
         tmp = app.render.attachNewNode("tmp-desk")
         tmp.setPos(F.DESK.x, F.DESK.y, 0.0)
@@ -221,53 +208,43 @@ class MonitorAlert:
         self.root.removeNode()
 
 
+ASSETS_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"))
+_TEX_CACHE: dict[str, tuple] = {}
+
+
 def _find_asset(filename: str) -> Optional[str]:
-    here = os.path.dirname(os.path.abspath(__file__))
-    for base in (os.path.join(here, "..", "assets", "chat"), os.path.join(os.getcwd(), "assets", "chat"),
-                 os.path.join(here, "assets", "chat"), os.path.join(here, "..", "assets"), here):
-        path = os.path.normpath(os.path.join(base, filename))
+    stem = os.path.splitext(filename)[0]
+    for name in (filename, stem + ".png", stem + ".jpg", stem + ".jpeg"):
+        path = os.path.join(ASSETS_DIR, name)
         if os.path.isfile(path):
             return path
     return None
 
 
-_TEX_CACHE: dict[str, tuple] = {}
-
-
 def _load_chat_texture(filename: str) -> Optional[tuple]:
-    """PNMImage -> Texture. Reads assets/chat/<file> if present, else the copy embedded in chat_images.py."""
     if filename in _TEX_CACHE:
         return _TEX_CACHE[filename]
-    img = PNMImage()
-    ok = False
     path = _find_asset(filename)
-    if path is not None:
-        ok = img.read(Filename.fromOsSpecific(path))
-    if not ok:
-        try:
-            from src.chat_images import IMAGES
-            data = base64.b64decode("".join(IMAGES[filename]))
-            ok = img.read(StringStream(data), filename)
-        except Exception as exc:
-            print(f"[cutscene] could not load picture '{filename}': {exc}")
-            return None
-    if not ok:
+    if path is None:
+        print(f"[cutscene] picture not found: {os.path.join(ASSETS_DIR, filename)}")
+        return None
+    img = PNMImage()
+    if not img.read(Filename.fromOsSpecific(path)):
+        print(f"[cutscene] could not read picture {path}")
         return None
     # power-of-two texture (works on every renderer); the display aspect comes from the original size
-    pot = PNMImage(512, 512)
+    pot = PNMImage(512, 512, img.getNumChannels())
     pot.quickFilterFrom(img)
     tex = Texture(filename)
     tex.load(pot)
     tex.setMinfilter(Texture.FTLinearMipmapLinear)
     tex.setMagfilter(Texture.FTLinear)
-    _TEX_CACHE[filename] = (tex, img.getYSize() / max(1, img.getXSize()))    # (texture, height / width)
+    _TEX_CACHE[filename] = (tex, img.getYSize() / max(1, img.getXSize()))      # (texture, height / width)
     return _TEX_CACHE[filename]
 
 
 # ============================================================================================ chat pane
 class _Chat:
-    """One conversation's message column. Lays bubbles out top to bottom and fades them in."""
-
     def __init__(self, ui: "WeChatUI", parent: NodePath) -> None:
         self.ui = ui
         self.root = parent.attachNewNode("chat")
@@ -634,8 +611,6 @@ class WeChatUI:
 
 # ============================================================================================ the cut scene
 class Cutscene:
-    """Owns the alert, the interaction prompt and the whole fade / freeze / WeChat sequence."""
-
     DUR = {"fade_out": 0.9, "hold_in": 0.6, "fade_in": 0.9, "chat": 2.0, "bp": 0.05, "cursor": 1.5, "hover": 0.45, "click": 0.22,
            "bp_hold": 5.0, "end_out": 0.9, "hold_out": 0.6, "end_in": 0.9}
     ORDER = ["fade_out", "hold_in", "fade_in", "chat", "cursor", "hover", "click", "bp", "bp_hold",
@@ -649,11 +624,17 @@ class Cutscene:
         self.alert = MonitorAlert(app)
         self.wechat = WeChatUI(app)
         self.state = "idle"             # idle -> ready -> playing -> done
+        self.on_finished: list = []     # callbacks run once the cut scene is over and the game is back
         self.clock = 0.0
         self.active = False
 
         cm = CardMaker("fade")
         cm.setFrame(-1, 1, -1, 1)
+        # solid black curtain over the 3D view for the whole time the cut scene is on screen (under the WeChat UI)
+        self.curtain = app.render2d.attachNewNode(cm.generate())
+        self.curtain.setColor(0, 0, 0, 1)
+        _style(self.curtain, L_BG - 1)
+        self.curtain.hide()
         self.fade = app.render2d.attachNewNode(cm.generate())
         self.fade.setColor(0, 0, 0, 0)
         self.fade.setTransparency(TransparencyAttrib.MAlpha)
@@ -722,6 +703,8 @@ class Cutscene:
             return
         name = self._phase_name()
         self._switched = False
+        if name == "hold_in":
+            self.curtain.show()             # screen is fully black here: put the permanent black cover over the city
         if name == "cursor":
             self._cursor_from = self.wechat.cursor_xy
         elif name == "click":
@@ -795,6 +778,7 @@ class Cutscene:
     def _enter_ui(self) -> None:
         app = self.app
         self._set_fade(1.0)
+        self.curtain.show()
         self._bg = app.getBackgroundColor()
         app.setBackgroundColor(0, 0, 0, 1)
         app.render.hide()                   # city, apartment, props, minions: not rendered at all
@@ -808,6 +792,7 @@ class Cutscene:
         app = self.app
         self._set_fade(1.0)
         self.wechat.hide()
+        self.curtain.hide()
         app.cam.node().setActive(True)
         app.render.show()
         app.aspect2d.show()
@@ -822,3 +807,5 @@ class Cutscene:
         self.alert.destroy()
         self.prompt.setText("")
         self.player.interact_hook = None
+        for fn in self.on_finished:
+            fn()
